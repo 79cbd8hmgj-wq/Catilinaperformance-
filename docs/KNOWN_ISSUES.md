@@ -15,7 +15,12 @@ This page tracks current limitations and development notes for CatalinaPerforman
 ## Feature Gaps
 
 - Fan control is not implemented yet.
-- Advanced options are placeholder-only.
+- Most Advanced options are still placeholder-only; App Priority is limited to one explicitly selected process.
+- App Priority boosting may not noticeably improve every app because scheduler behavior, bottlenecks, thermal limits, I/O, and GPU work can dominate performance.
+- Some priority changes may require administrator authorization, especially when lowering a nice value for a stronger priority boost.
+- Protected or system processes are intentionally blocked by App Priority scripts to avoid destabilizing macOS.
+- Closed processes cannot have their priority restored because the original PID no longer exists.
+- Process IDs change after relaunch, so saved selections must not be blindly reused for automatic boosting.
 
 ## Safety Boundaries
 

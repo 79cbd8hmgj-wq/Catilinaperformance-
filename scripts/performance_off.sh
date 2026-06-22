@@ -20,6 +20,8 @@ TMUTIL_STATE_FILE="$STATE_DIR/timemachine_before.txt"
 MDUTIL_STATE_FILE="$STATE_DIR/spotlight_boot_before.txt"
 ACTIONS_FILE="$STATE_DIR/actions_taken.txt"
 RESTORE_ACTIONS_FILE="$STATE_DIR/restore_actions_taken.txt"
+APP_PRIORITY_STATE_DIR="$STATE_DIR/app_priority"
+APP_PRIORITY_RESTORE_SCRIPT="$SCRIPT_DIR/app_priority_restore.sh"
 
 FORCE=0
 DRY_RUN=0
@@ -151,6 +153,36 @@ restore_pmset() {
     done < "$PMSET_RESTORE_FILE"
 }
 
+# Restore App Priority nice values opportunistically. This must not block the
+# rest of Performance Mode OFF from restoring pmset, Time Machine, or Spotlight.
+restore_app_priority() {
+    if [ ! -d "$APP_PRIORITY_STATE_DIR" ]; then
+        record_restore_action "Skipped App Priority restore: no saved app-priority state exists."
+        return 0
+    fi
+    if [ ! -f "$APP_PRIORITY_RESTORE_SCRIPT" ]; then
+        record_restore_action "Skipped App Priority restore: restore script is missing: $APP_PRIORITY_RESTORE_SCRIPT"
+        return 0
+    fi
+
+    RESTORE_ATTEMPTS=$((RESTORE_ATTEMPTS + 1))
+    if [ "$DRY_RUN" -eq 1 ]; then
+        record_restore_action "DRY RUN: would run App Priority restore script."
+        if ! /bin/sh "$APP_PRIORITY_RESTORE_SCRIPT" --dry-run --yes; then
+            record_restore_action "WARNING: App Priority dry-run restore reported a failure; continuing Performance Mode OFF."
+        fi
+        return 0
+    fi
+
+    record_restore_action "Attempting App Priority restore from saved state."
+    if /bin/sh "$APP_PRIORITY_RESTORE_SCRIPT" --yes; then
+        record_restore_action "App Priority restore completed."
+    else
+        record_restore_action "WARNING: App Priority restore reported a failure; continuing other Performance Mode OFF restores."
+    fi
+    return 0
+}
+
 # Re-enable Time Machine automatic backups only if performance_on.sh disabled it.
 restore_time_machine() {
     if ! performance_on_disabled_time_machine; then
@@ -266,6 +298,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     record_restore_action "Dry run requested; no settings will be changed."
 fi
 
+restore_app_priority
 restore_pmset
 restore_time_machine
 restore_spotlight

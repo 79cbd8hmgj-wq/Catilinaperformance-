@@ -64,12 +64,41 @@ See [docs/SAFETY_RULES.md](docs/SAFETY_RULES.md) for the detailed safety contrac
     ├── build_gui.sh
     ├── package_app.sh
     ├── emergency_restore.sh
+    ├── app_priority_apply.sh
+    ├── app_priority_report.sh
+    ├── app_priority_restore.sh
     ├── performance_off.sh
     ├── performance_on.sh
     ├── run_gui.sh
     ├── status_report.sh
     └── test_performance_cycle.sh
 ```
+
+## Advanced App Priority
+
+The **Advanced → App Priority** section is a narrowly scoped, user-controlled process priority tool. It can:
+
+- refresh a read-only list of current user-owned processes;
+- show each listed process's name, PID, owner, CPU %, memory %, and nice value when `ps` reports them;
+- let the user select exactly one process;
+- save that process's original nice value under `.catalina_performance_state/app_priority/`;
+- apply a conservative target nice value of `-5`; and
+- restore saved nice values with `scripts/app_priority_restore.sh`.
+
+Only one process is supported for now because priority changes affect live processes. A single explicit target is easier to review, log, and restore than broad “boost everything” behavior or recursive process-tree changes. CatalinaPerformance does **not** lower background app priority, auto-detect games/emulators/browsers, boost entire process trees, set CPU affinity, pin cores, kill processes, restart processes, install helpers, change fan control, delete caches, modify SIP, load kexts, undervolt, or access MSRs.
+
+Priority restore is best-effort: `performance_off.sh` attempts to run `scripts/app_priority_restore.sh --yes` whenever saved App Priority state exists, but it continues restoring pmset, Time Machine, and Spotlight even if an App Priority restore fails. Closed processes are skipped because their PIDs no longer exist. System and protected service names such as `launchd`, `kernel_task`, `WindowServer`, `loginwindow`, `mds`, `backupd`, `securityd`, `coreaudiod`, `configd`, and related daemons are intentionally refused by default.
+
+Manual script usage:
+
+```sh
+scripts/app_priority_report.sh
+scripts/app_priority_apply.sh --pid 12345 --yes
+scripts/app_priority_restore.sh --dry-run
+scripts/app_priority_restore.sh --yes
+```
+
+Lowering a nice value may require administrator authorization on macOS. The scripts explain this instead of attempting hidden privilege escalation.
 
 ## Current Status
 
@@ -151,7 +180,7 @@ The packaged `.app` is for local development only:
 - It is not installed into `/Applications` automatically.
 - The repository checkout must remain available because the app launcher points the GUI at the repo's `scripts/` directory.
 - If the repository is moved after packaging, re-run `scripts/package_app.sh` so the generated launcher records the new scripts path.
-- Advanced options remain planning/configuration-only; most controls are disabled placeholders, and no new system-changing behavior has been added. There is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
+- The Advanced App Priority section can list running user processes, apply a conservative nice-value boost to one selected process, and restore saved nice values. Other Advanced items remain planning/configuration-only or disabled placeholders. There is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
 
 ### Xcode 12.4 and Catalina Notes
 

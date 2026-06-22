@@ -165,6 +165,9 @@ enum ScriptKind {
     case performanceOn
     case performanceOff
     case emergencyRestore
+    case appPriorityReport
+    case appPriorityApply(pid: String)
+    case appPriorityRestore
 
     var fileName: String {
         switch self {
@@ -172,6 +175,9 @@ enum ScriptKind {
         case .performanceOn: return "performance_on.sh"
         case .performanceOff: return "performance_off.sh"
         case .emergencyRestore: return "emergency_restore.sh"
+        case .appPriorityReport: return "app_priority_report.sh"
+        case .appPriorityApply: return "app_priority_apply.sh"
+        case .appPriorityRestore: return "app_priority_restore.sh"
         }
     }
 
@@ -182,16 +188,20 @@ enum ScriptKind {
             // these scripts, then passes --yes so script output can be captured
             // in the app instead of blocking on terminal input.
             return ["--yes"]
-        case .status, .performanceOff:
+        case .status, .performanceOff, .appPriorityReport:
             return []
+        case .appPriorityApply(let pid):
+            return ["--pid", pid, "--yes"]
+        case .appPriorityRestore:
+            return ["--yes"]
         }
     }
 
     var requiresAdministratorPrivileges: Bool {
         switch self {
-        case .performanceOn, .performanceOff, .emergencyRestore:
+        case .performanceOn, .performanceOff, .emergencyRestore, .appPriorityApply, .appPriorityRestore:
             return true
-        case .status:
+        case .status, .appPriorityReport:
             return false
         }
     }
@@ -396,16 +406,27 @@ final class MainWindowController: NSWindowController {
 
 final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
+    private let runner = ScriptRunner()
+    private let processPopup = NSPopUpButton()
+    private let selectedProcessLabel = NSTextField(labelWithString: "Selected process: none")
+    private let priorityOutputTextView = NSTextView(frame: .zero)
+    private let refreshProcessesButton = NSButton(title: "Refresh Running Apps / Processes", target: nil, action: nil)
+    private let applyPriorityButton = NSButton(title: "Apply Priority Boost Now", target: nil, action: nil)
+    private let restorePriorityButton = NSButton(title: "Restore Priority", target: nil, action: nil)
+    private var processChoices: [String: (pid: String, name: String, owner: String, nice: String)] = [:]
     private let preferenceKeys = [
         "advanced.pauseSpotlightWhileOn",
         "advanced.pauseTimeMachineWhileOn",
         "advanced.preventPluggedInSleepWhileOn",
-        "advanced.preventDisplaySleepWhileOn"
+        "advanced.preventDisplaySleepWhileOn",
+        "advanced.appPriorityBoostEnabled",
+        "advanced.appPriorityLastPID",
+        "advanced.appPriorityLastName"
     ]
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 820),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -420,7 +441,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Planning and configuration UI only. These controls do not run scripts or change system behavior yet; Performance Mode remains controlled by the main Run Performance ON/OFF buttons.")
+        let description = wrappedLabel("Advanced keeps changes explicit and reversible. Background Services and Power Behavior preferences are lightweight settings; App Priority can run reviewed scripts only for one clearly selected process.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -441,10 +462,7 @@ final class AdvancedWindowController: NSWindowController {
             disabledCheckbox("Prevent disk sleep — Not implemented yet"),
             disabledCheckbox("Disable Power Nap — Not implemented yet")
         ]))
-        stack.addArrangedSubview(section("App Priority", controls: [
-            disabledCheckbox("Boost selected foreground app — Not implemented yet"),
-            disabledCheckbox("Lower background app priority — Not implemented yet")
-        ]))
+        stack.addArrangedSubview(section("App Priority", controls: appPriorityControls()))
         stack.addArrangedSubview(section("Memory / Storage", controls: [
             disabledCheckbox("Show swap warning — Not implemented yet"),
             disabledCheckbox("Show low disk warning — Not implemented yet"),
@@ -496,6 +514,40 @@ final class AdvancedWindowController: NSWindowController {
         return stack
     }
 
+    private func appPriorityControls() -> [NSView] {
+        refreshProcessesButton.target = self
+        refreshProcessesButton.action = #selector(refreshProcesses)
+        applyPriorityButton.target = self
+        applyPriorityButton.action = #selector(applyPriorityBoost)
+        restorePriorityButton.target = self
+        restorePriorityButton.action = #selector(restorePriority)
+        processPopup.target = self
+        processPopup.action = #selector(processSelectionChanged)
+        processPopup.addItem(withTitle: "Refresh to load processes")
+        let enable = plannedCheckbox("Enable selected app priority boost while Performance Mode is ON", key: preferenceKeys[4])
+        let buttons = NSStackView(views: [refreshProcessesButton, applyPriorityButton, restorePriorityButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        priorityOutputTextView.isEditable = false
+        priorityOutputTextView.isSelectable = true
+        priorityOutputTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        priorityOutputTextView.string = "App Priority output will appear here. Refresh the process list before selecting a target.\n"
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.documentView = priorityOutputTextView
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        return [
+            wrappedLabel("Select one user-owned target process. CatalinaPerformance saves the original nice value before changing anything and restores through app_priority_restore.sh."),
+            refreshProcessesButton, processPopup, selectedProcessLabel, enable, buttons,
+            disabledCheckbox("Lower background app priority — Not implemented yet"),
+            disabledCheckbox("Auto-detect emulator/game/browser — Not implemented yet"),
+            disabledCheckbox("Boost process tree — Not implemented yet"),
+            disabledCheckbox("Force CPU affinity / core pinning — Not available on macOS"),
+            scroll
+        ]
+    }
+
     private func plannedCheckbox(_ title: String, key: String) -> NSButton {
         let checkbox = NSButton(checkboxWithTitle: title + " — preference only; no system changes yet", target: self, action: #selector(savePreference(_:)))
         checkbox.identifier = NSUserInterfaceItemIdentifier(rawValue: key)
@@ -514,6 +566,63 @@ final class AdvancedWindowController: NSWindowController {
         let label = NSTextField(wrappingLabelWithString: text)
         label.maximumNumberOfLines = 0
         return label
+    }
+
+    @objc private func refreshProcesses() { runPriorityScript(.appPriorityReport, status: "Refreshing process list...") }
+
+    @objc private func processSelectionChanged() {
+        guard let title = processPopup.selectedItem?.title, let choice = processChoices[title] else { selectedProcessLabel.stringValue = "Selected process: none"; return }
+        selectedProcessLabel.stringValue = "Selected process: \(choice.name) | PID \(choice.pid) | nice \(choice.nice) | owner \(choice.owner)"
+        preferences.set(choice.pid, forKey: preferenceKeys[5])
+        preferences.set(choice.name, forKey: preferenceKeys[6])
+    }
+
+    @objc private func applyPriorityBoost() {
+        guard let title = processPopup.selectedItem?.title, let choice = processChoices[title] else { appendPriorityOutput("Select a process after refreshing the list.\n"); return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Apply priority boost to selected process?"
+        alert.informativeText = "CatalinaPerformance will run app_priority_apply.sh for PID \(choice.pid) (\(choice.name)) only. The script saves the original nice value and refuses protected system processes. Administrator authorization may be requested; cancelling will leave the UI unchanged."
+        alert.addButton(withTitle: "Apply Boost")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { runPriorityScript(.appPriorityApply(pid: choice.pid), status: "Applying priority boost...") }
+    }
+
+    @objc private func restorePriority() { runPriorityScript(.appPriorityRestore, status: "Restoring app priority...") }
+
+    private func runPriorityScript(_ script: ScriptKind, status: String) {
+        setPriorityButtonsEnabled(false)
+        appendPriorityOutput("\n$ \(runner.scriptCommand(for: script))\n")
+        runner.run(script) { [weak self] result in
+            guard let self = self else { return }
+            let output = result.output.isEmpty ? "(No output.)\n" : result.output
+            self.appendPriorityOutput(output.hasSuffix("\n") ? output : output + "\n")
+            self.appendPriorityOutput("[\(script.fileName) \(result.succeeded ? "succeeded" : "finished with status \(result.exitStatus.map(String.init) ?? "unknown")")]\n")
+            self.setPriorityButtonsEnabled(true)
+            if case .appPriorityReport = script { self.populateProcessMenu(from: output) } else { self.runPriorityScript(.appPriorityReport, status: "Refreshing process list...") }
+        }
+    }
+
+    private func populateProcessMenu(from report: String) {
+        processChoices.removeAll(); processPopup.removeAllItems()
+        for line in report.split(separator: "\n") {
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            if parts.count >= 6, Int(parts[0]) != nil {
+                let pid = String(parts[0]), owner = String(parts[1]), nice = String(parts[2]), name = parts.dropFirst(5).joined(separator: " ")
+                let title = "\(name) — PID \(pid) — nice \(nice) — \(owner)"
+                processChoices[title] = (pid, name, owner, nice); processPopup.addItem(withTitle: title)
+            }
+        }
+        if processChoices.isEmpty { processPopup.addItem(withTitle: "No user processes found") }
+        processSelectionChanged()
+    }
+
+    private func setPriorityButtonsEnabled(_ enabled: Bool) { refreshProcessesButton.isEnabled = enabled; applyPriorityButton.isEnabled = enabled; restorePriorityButton.isEnabled = enabled; processPopup.isEnabled = enabled }
+
+    private func appendPriorityOutput(_ text: String) {
+        let attributes: [NSAttributedString.Key: Any] = [.font: priorityOutputTextView.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.textColor]
+        priorityOutputTextView.textStorage?.append(NSAttributedString(string: text, attributes: attributes))
+        priorityOutputTextView.scrollRangeToVisible(NSRange(location: priorityOutputTextView.string.count, length: 0))
     }
 
     @objc private func savePreference(_ sender: NSButton) {
