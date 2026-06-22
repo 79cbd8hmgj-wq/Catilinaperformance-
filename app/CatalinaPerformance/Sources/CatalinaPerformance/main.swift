@@ -42,6 +42,9 @@ final class ScriptRunner {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [scriptURL.path] + script.arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment["CATALINA_PERFORMANCE_PREFERENCES_FILE"] = AdvancedPreferences.configFileURL.path
+        process.environment = environment
         finish(process, script: script, launchCommand: launchCommand, timeout: 60, completion: completion)
     }
 
@@ -97,7 +100,10 @@ final class ScriptRunner {
     }
 
     private func administratorAppleScript(for scriptURL: URL, arguments: [String]) -> String {
-        let command = (["/bin/sh", scriptURL.path] + arguments).map(shellQuote).joined(separator: " ")
+        let environmentPrefix = "CATALINA_PERFORMANCE_PREFERENCES_FILE=" + shellQuote(AdvancedPreferences.configFileURL.path)
+        let command = ([environmentPrefix, "/bin/sh", scriptURL.path] + arguments).map { value in
+            value == environmentPrefix ? value : shellQuote(value)
+        }.joined(separator: " ")
         return "do shell script \(appleScriptString(command)) with administrator privileges"
     }
 
@@ -152,7 +158,7 @@ final class ScriptRunner {
 struct AdvancedPreferences {
     static let pauseSpotlightKey = "advanced.pauseSpotlightWhileOn"
     static let pauseTimeMachineKey = "advanced.pauseTimeMachineWhileOn"
-    static let configFileName = "advanced_background_services.conf"
+    static let configFileName = "advanced_preferences.env"
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
         defaults.register(defaults: [
@@ -161,18 +167,30 @@ struct AdvancedPreferences {
         ])
     }
 
-    static func writeScriptConfig(repositoryRootURL: URL, defaults: UserDefaults = .standard) {
-        let directory = repositoryRootURL.appendingPathComponent(".catalina_performance_preferences", isDirectory: true)
-        let fileURL = directory.appendingPathComponent(configFileName)
+    static var configDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("CatalinaPerformance", isDirectory: true)
+    }
+
+    static var configFileURL: URL {
+        configDirectoryURL.appendingPathComponent(configFileName)
+    }
+
+    @discardableResult
+    static func writeScriptConfig(defaults: UserDefaults = .standard) -> Result<URL, Error> {
         let spotlight = defaults.bool(forKey: pauseSpotlightKey) ? "1" : "0"
         let timeMachine = defaults.bool(forKey: pauseTimeMachineKey) ? "1" : "0"
         let contents = "# CatalinaPerformance Advanced Background Services preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\n"
 
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+            try FileManager.default.createDirectory(at: configDirectoryURL, withIntermediateDirectories: true)
+            try contents.write(to: configFileURL, atomically: true, encoding: .utf8)
+            return .success(configFileURL)
         } catch {
             NSLog("Unable to write CatalinaPerformance script preferences: \(error.localizedDescription)")
+            return .failure(error)
         }
     }
 }
@@ -345,10 +363,17 @@ final class MainWindowController: NSWindowController {
 
     @objc private func showAdvanced() {
         if advancedWindowController == nil {
-            advancedWindowController = AdvancedWindowController(repositoryRootURL: runner.repositoryRootURL)
+            advancedWindowController = AdvancedWindowController(onPreferenceWriteFailure: { [weak self] message in
+                self?.showPreferenceWriteFailure(message)
+            })
         }
         advancedWindowController?.showWindow(nil)
         advancedWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    func showPreferenceWriteFailure(_ message: String) {
+        statusLabel.stringValue = "Status: Advanced preferences could not be saved."
+        appendOutput("\n[Advanced preferences error] \(message)\n")
     }
 
     private func confirm(title: String, message: String, then action: @escaping () -> Void) {
@@ -425,9 +450,9 @@ final class MainWindowController: NSWindowController {
 
 final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
-    private var repositoryRootURL = URL(fileURLWithPath: ".", isDirectory: true)
+    private var onPreferenceWriteFailure: ((String) -> Void)?
 
-    convenience init(repositoryRootURL: URL) {
+    convenience init(onPreferenceWriteFailure: ((String) -> Void)? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -436,9 +461,9 @@ final class AdvancedWindowController: NSWindowController {
         )
         window.title = "CatalinaPerformance Advanced"
         self.init(window: window)
-        self.repositoryRootURL = repositoryRootURL
+        self.onPreferenceWriteFailure = onPreferenceWriteFailure
         AdvancedPreferences.registerDefaults(in: preferences)
-        AdvancedPreferences.writeScriptConfig(repositoryRootURL: repositoryRootURL, defaults: preferences)
+        reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
         buildInterface()
     }
 
@@ -546,7 +571,14 @@ final class AdvancedWindowController: NSWindowController {
     @objc private func savePreference(_ sender: NSButton) {
         guard let key = sender.identifier?.rawValue else { return }
         preferences.set(sender.state == .on, forKey: key)
-        AdvancedPreferences.writeScriptConfig(repositoryRootURL: repositoryRootURL, defaults: preferences)
+        reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
+    }
+
+    private func reportPreferenceWriteResult(_ result: Result<URL, Error>) {
+        if case .failure(let error) = result {
+            let message = "Unable to write Advanced preferences to \(AdvancedPreferences.configFileURL.path): \(error.localizedDescription)"
+            onPreferenceWriteFailure?(message)
+        }
     }
 }
 
@@ -556,7 +588,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AdvancedPreferences.registerDefaults()
         let controller = MainWindowController()
-        AdvancedPreferences.writeScriptConfig(repositoryRootURL: controller.runner.repositoryRootURL)
+        if case .failure(let error) = AdvancedPreferences.writeScriptConfig() {
+            controller.showPreferenceWriteFailure("Unable to write Advanced preferences to \(AdvancedPreferences.configFileURL.path): \(error.localizedDescription)")
+        }
         controller.showWindow(nil)
         mainWindowController = controller
         NSApp.activate(ignoringOtherApps: true)

@@ -15,7 +15,7 @@ This page tracks current limitations and development notes for CatalinaPerforman
 ## Feature Gaps
 
 - Fan control is not implemented yet.
-- Advanced options are placeholder-only.
+- Most Advanced options are placeholder-only; only the existing Background Services pause preferences are script-readable via `~/Library/Application Support/CatalinaPerformance/advanced_preferences.env`.
 
 ## Safety Boundaries
 

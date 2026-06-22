@@ -83,7 +83,7 @@ The GUI is intentionally thin:
 
 - It displays the CatalinaPerformance app name, a Performance Mode ON/OFF switch, a small detected-state label, a success/failure status area, script output, and buttons for status refresh, Performance ON, Performance OFF, Emergency Restore, and Advanced.
 - The Advanced window is now a planning/configuration UI organized into Background Services, Power Behavior, App Priority, Memory / Storage, Thermal / Fan, Experimental, and Emergency / Restore sections.
-- Most Advanced controls are disabled placeholders clearly labeled `Not implemented yet`; the few selectable planning checkboxes save local UserDefaults preferences only and do not affect `performance_on.sh`, `performance_off.sh`, `emergency_restore.sh`, or `status_report.sh`.
+- Most Advanced controls are disabled placeholders clearly labeled `Not implemented yet`; the selectable Background Services checkboxes write script-readable preferences to `~/Library/Application Support/CatalinaPerformance/advanced_preferences.env`, and `performance_on.sh` reads that file the next time Performance Mode is turned ON. Missing or invalid preferences default to enabled for current-behavior compatibility.
 - It calls the existing scripts in `scripts/` instead of duplicating system-changing logic.
 - It detects Performance Mode by checking `.catalina_performance_state/performance_mode_on`, then disables Performance ON while the marker exists and disables Performance OFF while the marker is absent. Emergency Restore remains available.
 - It prints the exact `/bin/sh ...` command for each script, captures stdout and stderr in the scrollable output area, auto-scrolls after each run, and updates the status label with success or failure.
@@ -151,7 +151,7 @@ The packaged `.app` is for local development only:
 - It is not installed into `/Applications` automatically.
 - The repository checkout must remain available because the app launcher points the GUI at the repo's `scripts/` directory.
 - If the repository is moved after packaging, re-run `scripts/package_app.sh` so the generated launcher records the new scripts path.
-- Advanced options remain planning/configuration-only; most controls are disabled placeholders, and no new system-changing behavior has been added. There is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
+- Advanced options remain limited to configuring whether the existing Spotlight and Time Machine pause steps run; most controls are disabled placeholders, and no additional system-changing behavior has been added. There is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
 
 ### Xcode 12.4 and Catalina Notes
 

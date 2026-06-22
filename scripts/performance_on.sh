@@ -22,7 +22,7 @@ PMSET_RESTORE_FILE="$STATE_DIR/pmset_restore_commands.sh"
 TMUTIL_STATE_FILE="$STATE_DIR/timemachine_before.txt"
 MDUTIL_STATE_FILE="$STATE_DIR/spotlight_boot_before.txt"
 ACTIONS_FILE="$STATE_DIR/actions_taken.txt"
-PREFERENCES_FILE="$REPO_ROOT/.catalina_performance_preferences/advanced_background_services.conf"
+PREFERENCES_FILE="${CATALINA_PERFORMANCE_PREFERENCES_FILE:-${HOME:-}/Library/Application Support/CatalinaPerformance/advanced_preferences.env}"
 PAUSE_SPOTLIGHT_WHILE_ON=1
 PAUSE_TIME_MACHINE_WHILE_ON=1
 
@@ -83,9 +83,11 @@ read_boolean_preference() {
     fi
 
     value=$(awk -F= -v wanted="$key" '
+        /^[[:space:]]*($|#)/ { next }
         $1 == wanted {
-            gsub(/[[:space:]]/, "", $2)
-            print $2
+            value=$2
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            print value
             found=1
             exit
         }
@@ -95,11 +97,33 @@ read_boolean_preference() {
     case "$value" in
         1|true|TRUE|yes|YES|on|ON) printf '1' ;;
         0|false|FALSE|no|NO|off|OFF) printf '0' ;;
-        *) printf '%s' "$default_value" ;;
+        '')
+            log "Warning: Advanced preferences file $PREFERENCES_FILE is missing key $key; defaulting to enabled."
+            printf '%s' "$default_value"
+            ;;
+        *)
+            log "Warning: Advanced preferences file $PREFERENCES_FILE has invalid value for $key; defaulting to enabled."
+            printf '%s' "$default_value"
+            ;;
     esac
 }
 
+validate_preferences_file() {
+    if [ ! -f "$PREFERENCES_FILE" ]; then
+        log "Advanced preferences file not found at $PREFERENCES_FILE; defaulting background-service pauses to enabled."
+        return 0
+    fi
+
+    awk -F= '
+        /^[[:space:]]*($|#)/ { next }
+        $1 == "PAUSE_SPOTLIGHT_WHILE_ON" || $1 == "PAUSE_TIME_MACHINE_WHILE_ON" { next }
+        { bad=1 }
+        END { exit bad ? 1 : 0 }
+    ' "$PREFERENCES_FILE" 2>/dev/null || log "Warning: Advanced preferences file $PREFERENCES_FILE contains malformed or unknown entries; only known keys will be read."
+}
+
 load_preferences() {
+    validate_preferences_file
     PAUSE_SPOTLIGHT_WHILE_ON=$(read_boolean_preference PAUSE_SPOTLIGHT_WHILE_ON 1)
     PAUSE_TIME_MACHINE_WHILE_ON=$(read_boolean_preference PAUSE_TIME_MACHINE_WHILE_ON 1)
     log "Advanced Background Services preferences: Pause Spotlight=$PAUSE_SPOTLIGHT_WHILE_ON, Pause Time Machine=$PAUSE_TIME_MACHINE_WHILE_ON."
