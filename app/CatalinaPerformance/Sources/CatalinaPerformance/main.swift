@@ -118,7 +118,7 @@ final class ScriptRunner {
             .appendingPathComponent("performance_mode_on")
     }
 
-    private var repositoryRootURL: URL {
+    var repositoryRootURL: URL {
         resolveScript(named: ScriptKind.status.fileName)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -145,6 +145,35 @@ final class ScriptRunner {
         return currentDirectory
             .appendingPathComponent("scripts", isDirectory: true)
             .appendingPathComponent(fileName)
+    }
+}
+
+
+struct AdvancedPreferences {
+    static let pauseSpotlightKey = "advanced.pauseSpotlightWhileOn"
+    static let pauseTimeMachineKey = "advanced.pauseTimeMachineWhileOn"
+    static let configFileName = "advanced_background_services.conf"
+
+    static func registerDefaults(in defaults: UserDefaults = .standard) {
+        defaults.register(defaults: [
+            pauseSpotlightKey: true,
+            pauseTimeMachineKey: true
+        ])
+    }
+
+    static func writeScriptConfig(repositoryRootURL: URL, defaults: UserDefaults = .standard) {
+        let directory = repositoryRootURL.appendingPathComponent(".catalina_performance_preferences", isDirectory: true)
+        let fileURL = directory.appendingPathComponent(configFileName)
+        let spotlight = defaults.bool(forKey: pauseSpotlightKey) ? "1" : "0"
+        let timeMachine = defaults.bool(forKey: pauseTimeMachineKey) ? "1" : "0"
+        let contents = "# CatalinaPerformance Advanced Background Services preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\n"
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("Unable to write CatalinaPerformance script preferences: \(error.localizedDescription)")
+        }
     }
 }
 
@@ -198,7 +227,7 @@ enum ScriptKind {
 }
 
 final class MainWindowController: NSWindowController {
-    private let runner = ScriptRunner()
+    let runner = ScriptRunner()
     private let statusLabel = NSTextField(labelWithString: "Status: Not refreshed yet.")
     private let modeStateLabel = NSTextField(labelWithString: "Performance Mode appears OFF.")
     private let modeSwitch = NSSwitch()
@@ -316,7 +345,7 @@ final class MainWindowController: NSWindowController {
 
     @objc private func showAdvanced() {
         if advancedWindowController == nil {
-            advancedWindowController = AdvancedWindowController()
+            advancedWindowController = AdvancedWindowController(repositoryRootURL: runner.repositoryRootURL)
         }
         advancedWindowController?.showWindow(nil)
         advancedWindowController?.window?.makeKeyAndOrderFront(nil)
@@ -396,14 +425,9 @@ final class MainWindowController: NSWindowController {
 
 final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
-    private let preferenceKeys = [
-        "advanced.pauseSpotlightWhileOn",
-        "advanced.pauseTimeMachineWhileOn",
-        "advanced.preventPluggedInSleepWhileOn",
-        "advanced.preventDisplaySleepWhileOn"
-    ]
+    private var repositoryRootURL = URL(fileURLWithPath: ".", isDirectory: true)
 
-    convenience init() {
+    convenience init(repositoryRootURL: URL) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -412,6 +436,9 @@ final class AdvancedWindowController: NSWindowController {
         )
         window.title = "CatalinaPerformance Advanced"
         self.init(window: window)
+        self.repositoryRootURL = repositoryRootURL
+        AdvancedPreferences.registerDefaults(in: preferences)
+        AdvancedPreferences.writeScriptConfig(repositoryRootURL: repositoryRootURL, defaults: preferences)
         buildInterface()
     }
 
@@ -420,7 +447,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Planning and configuration UI only. These controls do not run scripts or change system behavior yet; Performance Mode remains controlled by the main Run Performance ON/OFF buttons.")
+        let description = wrappedLabel("Configure which existing background-service pauses Performance Mode applies. Changes are saved locally and read by performance_on.sh the next time Performance Mode is turned ON.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -430,14 +457,14 @@ final class AdvancedWindowController: NSWindowController {
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(description)
         stack.addArrangedSubview(section("Background Services", controls: [
-            plannedCheckbox("Pause Spotlight indexing while Performance Mode is ON", key: preferenceKeys[0]),
-            plannedCheckbox("Pause Time Machine while Performance Mode is ON", key: preferenceKeys[1]),
+            backgroundServiceCheckbox("Pause Spotlight indexing while Performance Mode is ON", key: AdvancedPreferences.pauseSpotlightKey),
+            backgroundServiceCheckbox("Pause Time Machine automatic backups while Performance Mode is ON", key: AdvancedPreferences.pauseTimeMachineKey),
             disabledCheckbox("Pause software update checks — Not implemented yet"),
             disabledCheckbox("Pause selected launch agents — Not implemented yet")
         ]))
         stack.addArrangedSubview(section("Power Behavior", controls: [
-            plannedCheckbox("Prevent plugged-in sleep while Performance Mode is ON", key: preferenceKeys[2]),
-            plannedCheckbox("Prevent display sleep while Performance Mode is ON", key: preferenceKeys[3]),
+            disabledCheckbox("Prevent plugged-in sleep while Performance Mode is ON — Not configurable yet"),
+            disabledCheckbox("Prevent display sleep while Performance Mode is ON — Not configurable yet"),
             disabledCheckbox("Prevent disk sleep — Not implemented yet"),
             disabledCheckbox("Disable Power Nap — Not implemented yet")
         ]))
@@ -496,8 +523,8 @@ final class AdvancedWindowController: NSWindowController {
         return stack
     }
 
-    private func plannedCheckbox(_ title: String, key: String) -> NSButton {
-        let checkbox = NSButton(checkboxWithTitle: title + " — preference only; no system changes yet", target: self, action: #selector(savePreference(_:)))
+    private func backgroundServiceCheckbox(_ title: String, key: String) -> NSButton {
+        let checkbox = NSButton(checkboxWithTitle: title, target: self, action: #selector(savePreference(_:)))
         checkbox.identifier = NSUserInterfaceItemIdentifier(rawValue: key)
         checkbox.state = preferences.bool(forKey: key) ? .on : .off
         return checkbox
@@ -519,6 +546,7 @@ final class AdvancedWindowController: NSWindowController {
     @objc private func savePreference(_ sender: NSButton) {
         guard let key = sender.identifier?.rawValue else { return }
         preferences.set(sender.state == .on, forKey: key)
+        AdvancedPreferences.writeScriptConfig(repositoryRootURL: repositoryRootURL, defaults: preferences)
     }
 }
 
@@ -526,7 +554,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AdvancedPreferences.registerDefaults()
         let controller = MainWindowController()
+        AdvancedPreferences.writeScriptConfig(repositoryRootURL: controller.runner.repositoryRootURL)
         controller.showWindow(nil)
         mainWindowController = controller
         NSApp.activate(ignoringOtherApps: true)

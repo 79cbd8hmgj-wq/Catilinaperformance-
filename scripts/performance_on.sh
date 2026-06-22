@@ -22,6 +22,9 @@ PMSET_RESTORE_FILE="$STATE_DIR/pmset_restore_commands.sh"
 TMUTIL_STATE_FILE="$STATE_DIR/timemachine_before.txt"
 MDUTIL_STATE_FILE="$STATE_DIR/spotlight_boot_before.txt"
 ACTIONS_FILE="$STATE_DIR/actions_taken.txt"
+PREFERENCES_FILE="$REPO_ROOT/.catalina_performance_preferences/advanced_background_services.conf"
+PAUSE_SPOTLIGHT_WHILE_ON=1
+PAUSE_TIME_MACHINE_WHILE_ON=1
 
 FORCE=0
 ASSUME_YES=0
@@ -68,6 +71,38 @@ log() {
 record_action() {
     printf '%s\n' "$1" >> "$ACTIONS_FILE"
     log "$1"
+}
+
+read_boolean_preference() {
+    key=$1
+    default_value=$2
+
+    if [ ! -f "$PREFERENCES_FILE" ]; then
+        printf '%s' "$default_value"
+        return 0
+    fi
+
+    value=$(awk -F= -v wanted="$key" '
+        $1 == wanted {
+            gsub(/[[:space:]]/, "", $2)
+            print $2
+            found=1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ' "$PREFERENCES_FILE" 2>/dev/null || printf '')
+
+    case "$value" in
+        1|true|TRUE|yes|YES|on|ON) printf '1' ;;
+        0|false|FALSE|no|NO|off|OFF) printf '0' ;;
+        *) printf '%s' "$default_value" ;;
+    esac
+}
+
+load_preferences() {
+    PAUSE_SPOTLIGHT_WHILE_ON=$(read_boolean_preference PAUSE_SPOTLIGHT_WHILE_ON 1)
+    PAUSE_TIME_MACHINE_WHILE_ON=$(read_boolean_preference PAUSE_TIME_MACHINE_WHILE_ON 1)
+    log "Advanced Background Services preferences: Pause Spotlight=$PAUSE_SPOTLIGHT_WHILE_ON, Pause Time Machine=$PAUSE_TIME_MACHINE_WHILE_ON."
 }
 
 run_privileged() {
@@ -164,6 +199,11 @@ apply_pmset_changes() {
 }
 
 save_time_machine_state() {
+    if [ "$PAUSE_TIME_MACHINE_WHILE_ON" != "1" ]; then
+        record_action "Skipped Time Machine pause: Advanced preference disabled by user."
+        return 0
+    fi
+
     if ! command_exists tmutil; then
         record_action "Skipped Time Machine pause: tmutil not found."
         return 0
@@ -183,6 +223,11 @@ save_time_machine_state() {
 }
 
 pause_time_machine() {
+    if [ "$PAUSE_TIME_MACHINE_WHILE_ON" != "1" ]; then
+        log "Skipped Time Machine pause because the Advanced preference is disabled."
+        return 0
+    fi
+
     if ! command_exists tmutil || [ ! -s "$TMUTIL_STATE_FILE" ]; then
         return 0
     fi
@@ -192,6 +237,11 @@ pause_time_machine() {
 }
 
 save_spotlight_state() {
+    if [ "$PAUSE_SPOTLIGHT_WHILE_ON" != "1" ]; then
+        record_action "Skipped Spotlight pause: Advanced preference disabled by user."
+        return 0
+    fi
+
     if ! command_exists mdutil; then
         record_action "Skipped Spotlight pause: mdutil not found."
         return 0
@@ -202,6 +252,11 @@ save_spotlight_state() {
 }
 
 pause_spotlight() {
+    if [ "$PAUSE_SPOTLIGHT_WHILE_ON" != "1" ]; then
+        log "Skipped Spotlight pause because the Advanced preference is disabled."
+        return 0
+    fi
+
     if ! command_exists mdutil || [ ! -s "$MDUTIL_STATE_FILE" ]; then
         return 0
     fi
@@ -235,6 +290,7 @@ if ! is_macos; then
     log "Non-macOS platform detected; macOS-specific changes will be skipped if commands are unavailable."
 fi
 
+load_preferences
 confirm_intent
 save_pmset_state
 save_time_machine_state
