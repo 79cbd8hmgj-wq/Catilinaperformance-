@@ -18,10 +18,16 @@ final class ScriptRunner {
         }
     }
 
-    func run(_ script: ScriptKind, completion: @escaping (String) -> Void) {
+    func command(for script: ScriptKind) -> String {
         let scriptURL = resolveScript(named: script.fileName)
+        return (["/bin/sh", scriptURL.path] + script.arguments).joined(separator: " ")
+    }
+
+    func run(_ script: ScriptKind, completion: @escaping (ScriptResult) -> Void) {
+        let scriptURL = resolveScript(named: script.fileName)
+        let command = command(for: script)
         guard fileManager.isExecutableFile(atPath: scriptURL.path) || fileManager.fileExists(atPath: scriptURL.path) else {
-            completion("Script not found: \(scriptURL.path)\nSet CATALINA_PERFORMANCE_SCRIPTS_DIR to the repository scripts directory during development.")
+            completion(ScriptResult(command: command, output: "Script not found: \(scriptURL.path)\nSet CATALINA_PERFORMANCE_SCRIPTS_DIR to the repository scripts directory during development.", exitStatus: nil))
             return
         }
 
@@ -36,18 +42,33 @@ final class ScriptRunner {
         do {
             try process.run()
         } catch {
-            completion("Failed to start \(script.fileName): \(error.localizedDescription)")
+            completion(ScriptResult(command: command, output: "Failed to start \(script.fileName): \(error.localizedDescription)", exitStatus: nil))
             return
         }
 
         process.terminationHandler = { process in
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
-            let status = "\n[\(script.fileName) exited with status \(process.terminationStatus)]"
             DispatchQueue.main.async {
-                completion(output + status)
+                completion(ScriptResult(command: command, output: output, exitStatus: process.terminationStatus))
             }
         }
+    }
+
+    func performanceModeIsOn() -> Bool {
+        fileManager.fileExists(atPath: performanceModeMarkerURL.path)
+    }
+
+    private var performanceModeMarkerURL: URL {
+        repositoryRootURL.appendingPathComponent(".catalina_performance_state", isDirectory: true)
+            .appendingPathComponent("performance_mode_on")
+    }
+
+    private var repositoryRootURL: URL {
+        resolveScript(named: ScriptKind.status.fileName)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .standardizedFileURL
     }
 
     private func resolveScript(named fileName: String) -> URL {
@@ -70,6 +91,16 @@ final class ScriptRunner {
         return currentDirectory
             .appendingPathComponent("scripts", isDirectory: true)
             .appendingPathComponent(fileName)
+    }
+}
+
+struct ScriptResult {
+    let command: String
+    let output: String
+    let exitStatus: Int32?
+
+    var succeeded: Bool {
+        exitStatus == 0
     }
 }
 
@@ -104,8 +135,12 @@ enum ScriptKind {
 final class MainWindowController: NSWindowController {
     private let runner = ScriptRunner()
     private let statusLabel = NSTextField(labelWithString: "Status: Not refreshed yet.")
+    private let modeStateLabel = NSTextField(labelWithString: "Performance Mode appears OFF.")
     private let modeSwitch = NSSwitch()
-    private let outputTextView = NSTextView()
+    private let outputTextView = NSTextView(frame: .zero)
+    private let onButton = NSButton(title: "Run Performance ON", target: nil, action: nil)
+    private let offButton = NSButton(title: "Run Performance OFF", target: nil, action: nil)
+    private let restoreButton = NSButton(title: "Emergency Restore", target: nil, action: nil)
 
     convenience init() {
         let window = NSWindow(
@@ -132,9 +167,12 @@ final class MainWindowController: NSWindowController {
         switchRow.alignment = .centerY
 
         let refreshButton = NSButton(title: "Refresh Status", target: self, action: #selector(refreshStatus))
-        let onButton = NSButton(title: "Run Performance ON", target: self, action: #selector(runPerformanceOn))
-        let offButton = NSButton(title: "Run Performance OFF", target: self, action: #selector(runPerformanceOff))
-        let restoreButton = NSButton(title: "Emergency Restore", target: self, action: #selector(runEmergencyRestore))
+        onButton.target = self
+        onButton.action = #selector(runPerformanceOn)
+        offButton.target = self
+        offButton.action = #selector(runPerformanceOff)
+        restoreButton.target = self
+        restoreButton.action = #selector(runEmergencyRestore)
         let advancedButton = NSButton(title: "Advanced", target: self, action: #selector(showAdvancedPlaceholder))
 
         let buttons = NSStackView(views: [refreshButton, onButton, offButton, restoreButton, advancedButton])
@@ -143,16 +181,27 @@ final class MainWindowController: NSWindowController {
         buttons.distribution = .fillProportionally
 
         outputTextView.isEditable = false
+        outputTextView.isSelectable = true
         outputTextView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        outputTextView.minSize = NSSize(width: 0, height: 0)
+        outputTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        outputTextView.isVerticallyResizable = true
+        outputTextView.isHorizontallyResizable = false
+        outputTextView.autoresizingMask = [.width]
+        outputTextView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        outputTextView.textContainer?.widthTracksTextView = true
         outputTextView.string = "Script output will appear here.\n"
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .bezelBorder
+        scrollView.drawsBackground = true
         scrollView.documentView = outputTextView
 
         let advancedPlaceholder = NSTextField(labelWithString: "Advanced options are not implemented yet.")
         advancedPlaceholder.textColor = .secondaryLabelColor
 
-        let layout = NSStackView(views: [title, switchRow, statusLabel, buttons, scrollView, advancedPlaceholder])
+        let layout = NSStackView(views: [title, switchRow, modeStateLabel, statusLabel, buttons, scrollView, advancedPlaceholder])
         layout.orientation = .vertical
         layout.spacing = 14
         layout.alignment = .leading
@@ -167,6 +216,8 @@ final class MainWindowController: NSWindowController {
             scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             scrollView.widthAnchor.constraint(equalTo: layout.widthAnchor)
         ])
+
+        updateModeControls()
     }
 
     @objc private func refreshStatus() {
@@ -178,13 +229,11 @@ final class MainWindowController: NSWindowController {
             title: "Turn Performance Mode ON?",
             message: "This will run the reviewed performance_on.sh script. It may ask macOS for administrator authorization through sudo, records prior state before changes, and does not implement fan control, cache deletion, SIP changes, kexts, undervolting, or experimental features."
         ) { [weak self] in
-            self?.modeSwitch.state = .on
             self?.run(.performanceOn, status: "Performance Mode ON requested...")
         }
     }
 
     @objc private func runPerformanceOff() {
-        modeSwitch.state = .off
         run(.performanceOff, status: "Performance Mode OFF requested...")
     }
 
@@ -193,7 +242,6 @@ final class MainWindowController: NSWindowController {
             title: "Run Emergency Restore?",
             message: "Emergency Restore is a fallback path for recoverable state. It calls emergency_restore.sh and will not delete caches, modify SIP, touch fan control, unload arbitrary services, install kexts, undervolt, or use experimental CPU/MSR changes."
         ) { [weak self] in
-            self?.modeSwitch.state = .off
             self?.run(.emergencyRestore, status: "Emergency Restore requested...")
         }
     }
@@ -216,16 +264,47 @@ final class MainWindowController: NSWindowController {
 
     private func run(_ script: ScriptKind, status: String) {
         statusLabel.stringValue = "Status: \(status)"
-        appendOutput("\n$ \(script.fileName) \(script.arguments.joined(separator: " "))\n")
-        runner.run(script) { [weak self] output in
-            self?.appendOutput(output + "\n")
-            self?.statusLabel.stringValue = "Status: Finished \(script.fileName)."
+        setRunButtonsEnabled(false)
+        appendOutput("\n$ \(runner.command(for: script))\n")
+        runner.run(script) { [weak self] result in
+            guard let self = self else { return }
+            let output = result.output.isEmpty ? "(No output.)\n" : result.output
+            self.appendOutput(output.hasSuffix("\n") ? output : output + "\n")
+
+            if let exitStatus = result.exitStatus {
+                self.appendOutput("[\(script.fileName) exited with status \(exitStatus)]\n")
+                self.statusLabel.stringValue = result.succeeded
+                    ? "Status: Success running \(script.fileName)."
+                    : "Status: Failed running \(script.fileName) (exit \(exitStatus))."
+            } else {
+                self.appendOutput("[\(script.fileName) did not start]\n")
+                self.statusLabel.stringValue = "Status: Failed running \(script.fileName) before exit."
+            }
+
+            self.updateModeControls()
+            self.outputTextView.scrollToEndOfDocument(nil)
         }
+    }
+
+    private func updateModeControls() {
+        let isOn = runner.performanceModeIsOn()
+        modeSwitch.state = isOn ? .on : .off
+        modeStateLabel.stringValue = "Performance Mode appears \(isOn ? "ON" : "OFF")."
+        onButton.isEnabled = !isOn
+        offButton.isEnabled = isOn
+        restoreButton.isEnabled = true
+    }
+
+    private func setRunButtonsEnabled(_ enabled: Bool) {
+        onButton.isEnabled = enabled
+        offButton.isEnabled = enabled
+        restoreButton.isEnabled = true
     }
 
     private func appendOutput(_ text: String) {
         outputTextView.textStorage?.append(NSAttributedString(string: text))
-        outputTextView.scrollToEndOfDocument(nil)
+        outputTextView.needsDisplay = true
+        outputTextView.scrollRangeToVisible(NSRange(location: outputTextView.string.count, length: 0))
     }
 }
 

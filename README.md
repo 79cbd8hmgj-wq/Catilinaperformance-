@@ -76,9 +76,11 @@ A minimal macOS GUI shell now lives in `app/CatalinaPerformance`. It is a Swift 
 
 The GUI is intentionally thin:
 
-- It displays the CatalinaPerformance app name, a Performance Mode ON/OFF switch, a status area, script output, and buttons for status refresh, Performance ON, Performance OFF, Emergency Restore, and an Advanced placeholder.
+- It displays the CatalinaPerformance app name, a Performance Mode ON/OFF switch, a small detected-state label, a success/failure status area, script output, and buttons for status refresh, Performance ON, Performance OFF, Emergency Restore, and an Advanced placeholder.
 - The Advanced area is only a placeholder and says: `Advanced options are not implemented yet.`
 - It calls the existing scripts in `scripts/` instead of duplicating system-changing logic.
+- It detects Performance Mode by checking `.catalina_performance_state/performance_mode_on`, then disables Performance ON while the marker exists and disables Performance OFF while the marker is absent. Emergency Restore remains available.
+- It prints the exact `/bin/sh ...` command for each script, captures stdout and stderr in the scrollable output area, auto-scrolls after each run, and updates the status label with success or failure.
 - It does not implement fan control, cache cleaning, SIP changes, launch daemon toggles, undervolting, MSR changes, kext loading, or experimental features.
 - It shows warning confirmations before running Performance ON or Emergency Restore.
 
@@ -94,5 +96,23 @@ By default, the development build resolves scripts relative to the repository ch
 ```sh
 CATALINA_PERFORMANCE_SCRIPTS_DIR=/path/to/Catilinaperformance-/scripts swift run CatalinaPerformance
 ```
+
+
+### GUI Test Instructions
+
+Use a macOS development machine for GUI behavior because the AppKit executable does not launch on non-macOS systems. To test the output and state handling safely during development:
+
+1. Start from the package directory and point the GUI at the repository scripts if needed:
+
+   ```sh
+   cd app/CatalinaPerformance
+   CATALINA_PERFORMANCE_SCRIPTS_DIR=/path/to/Catilinaperformance-/scripts swift run CatalinaPerformance
+   ```
+
+2. Click **Refresh Status** and confirm the output box shows the exact `/bin/sh .../status_report.sh` command followed by script stdout/stderr and an exit-status line.
+3. With `.catalina_performance_state/performance_mode_on` absent, confirm the state label says **Performance Mode appears OFF**, **Run Performance OFF** is disabled, **Run Performance ON** is enabled, and **Emergency Restore** remains enabled.
+4. Create or preserve the marker file only through the reviewed scripts when possible. After running **Run Performance ON**, confirm the GUI refreshes the switch and state label from `.catalina_performance_state/performance_mode_on`, disables **Run Performance ON**, and keeps output scrolled to the latest exit-status line.
+5. After running **Run Performance OFF** or **Emergency Restore**, confirm the marker is removed, the switch and label show OFF, **Run Performance OFF** is disabled, and **Emergency Restore** remains enabled.
+6. Repeat an ON/OFF cycle and verify each run reports a clear success or failure in the status label without adding fan control, cache cleaning, SIP changes, launch daemon controls, privileged helpers, or advanced options.
 
 Future packaged `.app` work should keep the same app/script boundary: the GUI may collect user intent and display output, while reversible system behavior and restore paths remain in reviewed scripts.
