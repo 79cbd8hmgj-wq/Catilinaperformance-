@@ -61,9 +61,11 @@ See [docs/SAFETY_RULES.md](docs/SAFETY_RULES.md) for the detailed safety contrac
 │       ├── Package.swift
 │       └── Sources/CatalinaPerformance/main.swift
 └── scripts/
+    ├── build_gui.sh
     ├── emergency_restore.sh
     ├── performance_off.sh
     ├── performance_on.sh
+    ├── run_gui.sh
     ├── status_report.sh
     └── test_performance_cycle.sh
 ```
@@ -86,18 +88,53 @@ The GUI is intentionally thin:
 - It does not implement fan control, cache cleaning, SIP changes, launch daemon toggles, undervolting, MSR changes, kext loading, or experimental features.
 - It shows warning confirmations before running Performance ON or Emergency Restore.
 
-From a macOS Catalina development machine with Xcode command line tools installed:
+### Building the GUI
+
+Use the local build helper from anywhere inside or outside the repository:
+
+```sh
+/path/to/Catilinaperformance-/scripts/build_gui.sh
+```
+
+The helper only verifies the local developer tools and runs `swift build` in `app/CatalinaPerformance`; it does not change system settings or apply Performance Mode. It checks that an Xcode developer directory is selected, that `xcrun` can locate `xctest`, and that `swift` is available before building the package.
+
+### Running the GUI
+
+Use the local run helper from anywhere inside or outside the repository:
+
+```sh
+/path/to/Catilinaperformance-/scripts/run_gui.sh
+```
+
+The helper sets `CATALINA_PERFORMANCE_SCRIPTS_DIR` to this checkout's `scripts/` directory, prints the exact command it is about to run, then launches the Swift package with `swift run CatalinaPerformance`. The GUI still requires clear user intent before running any Performance Mode script.
+
+You can also run the package manually from a macOS Catalina development machine with Xcode installed:
 
 ```sh
 cd app/CatalinaPerformance
-swift run CatalinaPerformance
-```
-
-By default, the development build resolves scripts relative to the repository checkout. If you run the app from another working directory, set the scripts directory explicitly:
-
-```sh
 CATALINA_PERFORMANCE_SCRIPTS_DIR=/path/to/Catilinaperformance-/scripts swift run CatalinaPerformance
 ```
+
+### Xcode 12.4 and Catalina Notes
+
+CatalinaPerformance targets macOS Catalina 10.15 and uses Swift Package Manager with AppKit. For the intended Catalina development environment, install Xcode 12.4 and open it at least once so macOS can finish installing required components. If multiple Xcode versions or only the command line tools are installed, select the full Xcode developer directory before building:
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+The helper scripts do not run `sudo`, do not change the selected developer directory, and do not alter SIP, caches, launch daemons, fan controls, or other system performance settings.
+
+### xctest Troubleshooting
+
+If `scripts/build_gui.sh` reports that `xcrun` cannot find `xctest`, the selected developer tools are usually incomplete or point at the command line tools instead of full Xcode. Check the selected path with:
+
+```sh
+xcode-select -p
+xcrun -f xctest
+```
+
+On Catalina, resolve this by installing or repairing Xcode 12.4, opening Xcode once to complete setup, and selecting `/Applications/Xcode.app/Contents/Developer` with `xcode-select`. Re-run `scripts/build_gui.sh` after `xcrun -f xctest` prints a valid path.
 
 
 ### GUI Test Instructions
