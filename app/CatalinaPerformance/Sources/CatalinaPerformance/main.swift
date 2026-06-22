@@ -395,36 +395,34 @@ final class MainWindowController: NSWindowController {
 
 
 
+struct AdvancedPreference {
+    let userDefaultsKey: String
+    let fileKey: String
+}
+
 final class AdvancedPreferencesStore {
-    static let keys = [
-        "advanced.pauseSpotlightWhileOn",
-        "advanced.pauseTimeMachineWhileOn",
-        "advanced.preventPluggedInSleepWhileOn",
-        "advanced.preventDisplaySleepWhileOn"
+    static let preferences = [
+        AdvancedPreference(userDefaultsKey: "advanced.pauseSpotlightWhileOn", fileKey: "PAUSE_SPOTLIGHT_WHILE_ON"),
+        AdvancedPreference(userDefaultsKey: "advanced.pauseTimeMachineWhileOn", fileKey: "PAUSE_TIME_MACHINE_WHILE_ON"),
+        AdvancedPreference(userDefaultsKey: "advanced.preventPluggedInSleepWhileOn", fileKey: "PREVENT_PLUGGED_IN_SLEEP_WHILE_ON"),
+        AdvancedPreference(userDefaultsKey: "advanced.preventDisplaySleepWhileOn", fileKey: "PREVENT_DISPLAY_SLEEP_WHILE_ON")
     ]
+    static let keys = preferences.map { $0.userDefaultsKey }
 
     private let defaults = UserDefaults.standard
     private let fileManager = FileManager.default
     private let preferencesURL: URL
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        let rootURL: URL
-        if let configured = environment["CATALINA_PERFORMANCE_SCRIPTS_DIR"], !configured.isEmpty {
-            rootURL = URL(fileURLWithPath: configured, isDirectory: true)
-                .deletingLastPathComponent()
-                .standardizedFileURL
+    init() {
+        if let supportDirectory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            preferencesURL = supportDirectory
+                .appendingPathComponent("CatalinaPerformance", isDirectory: true)
+                .appendingPathComponent("advanced_preferences.env")
         } else {
-            let currentDirectory = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
-            let packageRoot = currentDirectory.appendingPathComponent("../..", isDirectory: true).standardizedFileURL
-            if fileManager.fileExists(atPath: packageRoot.appendingPathComponent("scripts/performance_on.sh").path) {
-                rootURL = packageRoot
-            } else {
-                rootURL = currentDirectory.standardizedFileURL
-            }
+            preferencesURL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent("Library/Application Support/CatalinaPerformance", isDirectory: true)
+                .appendingPathComponent("advanced_preferences.env")
         }
-        preferencesURL = rootURL
-            .appendingPathComponent(".catalina_performance_preferences", isDirectory: true)
-            .appendingPathComponent("advanced.conf")
         registerDefaults()
         loadFilePreferencesIntoDefaults()
         save()
@@ -452,16 +450,17 @@ final class AdvancedPreferencesStore {
             guard parts.count == 2 else { continue }
             let key = String(parts[0])
             let value = String(parts[1])
-            guard AdvancedPreferencesStore.keys.contains(key), value == "0" || value == "1" else { continue }
-            defaults.set(value == "1", forKey: key)
+            guard value == "0" || value == "1" else { continue }
+            guard let preference = AdvancedPreferencesStore.preferences.first(where: { $0.fileKey == key || $0.userDefaultsKey == key }) else { continue }
+            defaults.set(value == "1", forKey: preference.userDefaultsKey)
         }
     }
 
     private func save() {
         do {
             try fileManager.createDirectory(at: preferencesURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
-            let contents = AdvancedPreferencesStore.keys
-                .map { "\($0)=\(defaults.bool(forKey: $0) ? "1" : "0")" }
+            let contents = AdvancedPreferencesStore.preferences
+                .map { "\($0.fileKey)=\(defaults.bool(forKey: $0.userDefaultsKey) ? "1" : "0")" }
                 .joined(separator: "\n") + "\n"
             try contents.write(to: preferencesURL, atomically: true, encoding: .utf8)
         } catch {

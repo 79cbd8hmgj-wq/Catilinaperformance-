@@ -22,8 +22,8 @@ PMSET_RESTORE_FILE="$STATE_DIR/pmset_restore_commands.sh"
 TMUTIL_STATE_FILE="$STATE_DIR/timemachine_before.txt"
 MDUTIL_STATE_FILE="$STATE_DIR/spotlight_boot_before.txt"
 ACTIONS_FILE="$STATE_DIR/actions_taken.txt"
-PREFERENCES_DIR="$REPO_ROOT/.catalina_performance_preferences"
-ADVANCED_PREFERENCES_FILE="$PREFERENCES_DIR/advanced.conf"
+PREFERENCES_DIR="${HOME:-}/Library/Application Support/CatalinaPerformance"
+ADVANCED_PREFERENCES_FILE="$PREFERENCES_DIR/advanced_preferences.env"
 
 PREF_PAUSE_SPOTLIGHT=1
 PREF_PAUSE_TIME_MACHINE=1
@@ -92,23 +92,47 @@ run_privileged() {
 
 read_advanced_preferences() {
     if [ ! -f "$ADVANCED_PREFERENCES_FILE" ]; then
-        log "Advanced preferences file not found; using safe default enabled settings."
+        log "Advanced preferences file not found at $ADVANCED_PREFERENCES_FILE; using safe default enabled settings."
         return 0
     fi
 
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             ""|\#*) continue ;;
-            advanced.pauseSpotlightWhileOn=0) PREF_PAUSE_SPOTLIGHT=0 ;;
-            advanced.pauseSpotlightWhileOn=1) PREF_PAUSE_SPOTLIGHT=1 ;;
-            advanced.pauseTimeMachineWhileOn=0) PREF_PAUSE_TIME_MACHINE=0 ;;
-            advanced.pauseTimeMachineWhileOn=1) PREF_PAUSE_TIME_MACHINE=1 ;;
-            advanced.preventPluggedInSleepWhileOn=0) PREF_PREVENT_PLUGGED_IN_SLEEP=0 ;;
-            advanced.preventPluggedInSleepWhileOn=1) PREF_PREVENT_PLUGGED_IN_SLEEP=1 ;;
-            advanced.preventDisplaySleepWhileOn=0) PREF_PREVENT_DISPLAY_SLEEP=0 ;;
-            advanced.preventDisplaySleepWhileOn=1) PREF_PREVENT_DISPLAY_SLEEP=1 ;;
-            advanced.*=*) log "Ignored unknown Advanced preference key: ${line%%=*}" ;;
-            *) log "Ignored malformed Advanced preference line." ;;
+            *=*) ;;
+            *)
+                log "Ignored malformed Advanced preference line without key=value syntax."
+                continue
+                ;;
+        esac
+
+        key=${line%%=*}
+        value=${line#*=}
+        case "$value" in
+            0|1) ;;
+            *)
+                case "$key" in
+                    PAUSE_SPOTLIGHT_WHILE_ON|PAUSE_TIME_MACHINE_WHILE_ON|PREVENT_PLUGGED_IN_SLEEP_WHILE_ON|PREVENT_DISPLAY_SLEEP_WHILE_ON|advanced.pauseSpotlightWhileOn|advanced.pauseTimeMachineWhileOn|advanced.preventPluggedInSleepWhileOn|advanced.preventDisplaySleepWhileOn)
+                        log "Ignored malformed Advanced preference value for $key: expected 0 or 1."
+                        ;;
+                    *)
+                        log "Ignored unknown Advanced preference key: $key"
+                        ;;
+                esac
+                continue
+                ;;
+        esac
+
+        case "$key=$value" in
+            PAUSE_SPOTLIGHT_WHILE_ON=0|advanced.pauseSpotlightWhileOn=0) PREF_PAUSE_SPOTLIGHT=0 ;;
+            PAUSE_SPOTLIGHT_WHILE_ON=1|advanced.pauseSpotlightWhileOn=1) PREF_PAUSE_SPOTLIGHT=1 ;;
+            PAUSE_TIME_MACHINE_WHILE_ON=0|advanced.pauseTimeMachineWhileOn=0) PREF_PAUSE_TIME_MACHINE=0 ;;
+            PAUSE_TIME_MACHINE_WHILE_ON=1|advanced.pauseTimeMachineWhileOn=1) PREF_PAUSE_TIME_MACHINE=1 ;;
+            PREVENT_PLUGGED_IN_SLEEP_WHILE_ON=0|advanced.preventPluggedInSleepWhileOn=0) PREF_PREVENT_PLUGGED_IN_SLEEP=0 ;;
+            PREVENT_PLUGGED_IN_SLEEP_WHILE_ON=1|advanced.preventPluggedInSleepWhileOn=1) PREF_PREVENT_PLUGGED_IN_SLEEP=1 ;;
+            PREVENT_DISPLAY_SLEEP_WHILE_ON=0|advanced.preventDisplaySleepWhileOn=0) PREF_PREVENT_DISPLAY_SLEEP=0 ;;
+            PREVENT_DISPLAY_SLEEP_WHILE_ON=1|advanced.preventDisplaySleepWhileOn=1) PREF_PREVENT_DISPLAY_SLEEP=1 ;;
+            *) log "Ignored unknown Advanced preference key: $key" ;;
         esac
     done < "$ADVANCED_PREFERENCES_FILE"
 }

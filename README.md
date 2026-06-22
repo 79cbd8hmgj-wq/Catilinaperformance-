@@ -83,7 +83,7 @@ The GUI is intentionally thin:
 
 - It displays the CatalinaPerformance app name, a Performance Mode ON/OFF switch, a small detected-state label, a success/failure status area, script output, and buttons for status refresh, Performance ON, Performance OFF, Emergency Restore, and Advanced.
 - The Advanced window is now a planning/configuration UI organized into Background Services, Power Behavior, App Priority, Memory / Storage, Thermal / Fan, Experimental, and Emergency / Restore sections.
-- Most Advanced controls are disabled placeholders clearly labeled `Not implemented yet`. Background Services and Power Behavior checkboxes save known keys to `.catalina_performance_preferences/advanced.conf` so `performance_on.sh` can read them without unsafe shell evaluation.
+- Most Advanced controls are disabled placeholders clearly labeled `Not implemented yet`. Background Services and Power Behavior checkboxes save known keys to `~/Library/Application Support/CatalinaPerformance/advanced_preferences.env` so `performance_on.sh` can read them without unsafe shell evaluation.
 - It calls the existing scripts in `scripts/` instead of duplicating system-changing logic.
 - It detects Performance Mode by checking `.catalina_performance_state/performance_mode_on`, then disables Performance ON while the marker exists and disables Performance OFF while the marker is absent. Emergency Restore remains available.
 - It prints the exact `/bin/sh ...` command for each script, captures stdout and stderr in the scrollable output area, auto-scrolls after each run, and updates the status label with success or failure.
@@ -92,7 +92,7 @@ The GUI is intentionally thin:
 
 ## Advanced Power Behavior
 
-The Advanced window includes a **Power Behavior** section. These options are saved as explicit `0`/`1` values in `.catalina_performance_preferences/advanced.conf`, alongside the existing Background Services preferences, so the shell scripts read only known preference keys.
+The Advanced window includes a **Power Behavior** section. These options are saved as explicit `0`/`1` values in `~/Library/Application Support/CatalinaPerformance/advanced_preferences.env`, alongside the existing Background Services preferences, so the shell scripts read only known preference keys.
 
 Enabled by default:
 
