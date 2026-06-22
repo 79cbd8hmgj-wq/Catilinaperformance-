@@ -165,6 +165,7 @@ enum ScriptKind {
     case performanceOn
     case performanceOff
     case emergencyRestore
+    case memoryStorageReport(arguments: [String])
 
     var fileName: String {
         switch self {
@@ -172,6 +173,7 @@ enum ScriptKind {
         case .performanceOn: return "performance_on.sh"
         case .performanceOff: return "performance_off.sh"
         case .emergencyRestore: return "emergency_restore.sh"
+        case .memoryStorageReport: return "memory_storage_report.sh"
         }
     }
 
@@ -184,6 +186,8 @@ enum ScriptKind {
             return ["--yes"]
         case .status, .performanceOff:
             return []
+        case .memoryStorageReport(let arguments):
+            return arguments
         }
     }
 
@@ -191,7 +195,7 @@ enum ScriptKind {
         switch self {
         case .performanceOn, .performanceOff, .emergencyRestore:
             return true
-        case .status:
+        case .status, .memoryStorageReport:
             return false
         }
     }
@@ -316,7 +320,9 @@ final class MainWindowController: NSWindowController {
 
     @objc private func showAdvanced() {
         if advancedWindowController == nil {
-            advancedWindowController = AdvancedWindowController()
+            advancedWindowController = AdvancedWindowController(runMemoryStorageCheck: { [weak self] arguments in
+                self?.run(.memoryStorageReport(arguments: arguments), status: "Memory / Storage check requested...")
+            })
         }
         advancedWindowController?.showWindow(nil)
         advancedWindowController?.window?.makeKeyAndOrderFront(nil)
@@ -396,14 +402,19 @@ final class MainWindowController: NSWindowController {
 
 final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
+    private let runMemoryStorageCheck: ([String]) -> Void
     private let preferenceKeys = [
         "advanced.pauseSpotlightWhileOn",
         "advanced.pauseTimeMachineWhileOn",
         "advanced.preventPluggedInSleepWhileOn",
-        "advanced.preventDisplaySleepWhileOn"
+        "advanced.preventDisplaySleepWhileOn",
+        "advanced.showSwapUsageWarning",
+        "advanced.showLowDiskSpaceWarning",
+        "advanced.showMemoryPressureSummary",
+        "advanced.showTopMemoryHeavyProcesses"
     ]
 
-    convenience init() {
+    convenience init(runMemoryStorageCheck: @escaping ([String]) -> Void) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -411,8 +422,24 @@ final class AdvancedWindowController: NSWindowController {
             defer: false
         )
         window.title = "CatalinaPerformance Advanced"
-        self.init(window: window)
+        self.init(window: window, runMemoryStorageCheck: runMemoryStorageCheck)
         buildInterface()
+    }
+
+    init(window: NSWindow, runMemoryStorageCheck: @escaping ([String]) -> Void) {
+        self.runMemoryStorageCheck = runMemoryStorageCheck
+        super.init(window: window)
+        preferences.register(defaults: [
+            preferenceKeys[4]: true,
+            preferenceKeys[5]: true,
+            preferenceKeys[6]: true,
+            preferenceKeys[7]: true
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        self.runMemoryStorageCheck = { _ in }
+        super.init(coder: coder)
     }
 
     private func buildInterface() {
@@ -420,7 +447,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Planning and configuration UI only. These controls do not run scripts or change system behavior yet; Performance Mode remains controlled by the main Run Performance ON/OFF buttons.")
+        let description = wrappedLabel("Advanced preferences are conservative. Memory / Storage checks are read-only and informational; Performance Mode remains controlled by the main Run Performance ON/OFF buttons.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -446,9 +473,16 @@ final class AdvancedWindowController: NSWindowController {
             disabledCheckbox("Lower background app priority — Not implemented yet")
         ]))
         stack.addArrangedSubview(section("Memory / Storage", controls: [
-            disabledCheckbox("Show swap warning — Not implemented yet"),
-            disabledCheckbox("Show low disk warning — Not implemented yet"),
-            disabledCheckbox("Cache cleanup tools — Not implemented yet; future manual-only feature")
+            wrappedLabel("Read-only checks only. Thresholds are conservative: warn above 1 GB swap used, below 15% or 20 GB startup disk free, or when macOS reports elevated memory pressure."),
+            plannedCheckbox("Show swap usage warning", key: preferenceKeys[4], suffix: " — read-only; default enabled"),
+            plannedCheckbox("Show low disk space warning", key: preferenceKeys[5], suffix: " — read-only; default enabled"),
+            plannedCheckbox("Show memory pressure summary", key: preferenceKeys[6], suffix: " — read-only; default enabled"),
+            plannedCheckbox("Show top memory-heavy processes", key: preferenceKeys[7], suffix: " — read-only; default enabled"),
+            actionButton("Run Memory / Storage Check", action: #selector(runMemoryStorageReport)),
+            disabledCheckbox("Show top disk-heavy folders — Optional future read-only scan; not enabled by default"),
+            disabledCheckbox("Cache cleanup tools — Not implemented yet — future manual-only feature"),
+            disabledCheckbox("Browser cache cleanup — Not implemented yet — future manual-only feature"),
+            disabledCheckbox("Automatic cleanup — Disabled; discouraged and not implemented")
         ]))
         stack.addArrangedSubview(section("Thermal / Fan", controls: [
             disabledCheckbox("Show fan RPM — Not implemented yet"),
@@ -496,8 +530,8 @@ final class AdvancedWindowController: NSWindowController {
         return stack
     }
 
-    private func plannedCheckbox(_ title: String, key: String) -> NSButton {
-        let checkbox = NSButton(checkboxWithTitle: title + " — preference only; no system changes yet", target: self, action: #selector(savePreference(_:)))
+    private func plannedCheckbox(_ title: String, key: String, suffix: String = " — preference only; no system changes yet") -> NSButton {
+        let checkbox = NSButton(checkboxWithTitle: title + suffix, target: self, action: #selector(savePreference(_:)))
         checkbox.identifier = NSUserInterfaceItemIdentifier(rawValue: key)
         checkbox.state = preferences.bool(forKey: key) ? .on : .off
         return checkbox
@@ -510,6 +544,12 @@ final class AdvancedWindowController: NSWindowController {
         return checkbox
     }
 
+    private func actionButton(_ title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        return button
+    }
+
     private func wrappedLabel(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
         label.maximumNumberOfLines = 0
@@ -519,6 +559,15 @@ final class AdvancedWindowController: NSWindowController {
     @objc private func savePreference(_ sender: NSButton) {
         guard let key = sender.identifier?.rawValue else { return }
         preferences.set(sender.state == .on, forKey: key)
+    }
+
+    @objc private func runMemoryStorageReport() {
+        var arguments: [String] = []
+        if !preferences.bool(forKey: preferenceKeys[4]) { arguments.append("--no-swap") }
+        if !preferences.bool(forKey: preferenceKeys[5]) { arguments.append("--no-disk") }
+        if !preferences.bool(forKey: preferenceKeys[6]) { arguments.append("--no-pressure") }
+        if !preferences.bool(forKey: preferenceKeys[7]) { arguments.append("--no-top-processes") }
+        runMemoryStorageCheck(arguments)
     }
 }
 

@@ -82,6 +82,7 @@ fi
 require_file "$PACKAGE_DIR/Package.swift"
 require_file "$PACKAGE_DIR/Sources/CatalinaPerformance/main.swift"
 require_executable_or_file "$SCRIPT_DIR/status_report.sh"
+require_executable_or_file "$SCRIPT_DIR/memory_storage_report.sh"
 require_executable_or_file "$SCRIPT_DIR/performance_on.sh"
 require_executable_or_file "$SCRIPT_DIR/performance_off.sh"
 require_executable_or_file "$SCRIPT_DIR/emergency_restore.sh"
