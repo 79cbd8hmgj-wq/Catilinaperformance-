@@ -206,6 +206,8 @@ final class MainWindowController: NSWindowController {
     private let onButton = NSButton(title: "Run Performance ON", target: nil, action: nil)
     private let offButton = NSButton(title: "Run Performance OFF", target: nil, action: nil)
     private let restoreButton = NSButton(title: "Emergency Restore", target: nil, action: nil)
+    private let advancedButton = NSButton(title: "Advanced", target: nil, action: nil)
+    private var advancedWindowController: AdvancedWindowController?
 
     convenience init() {
         let window = NSWindow(
@@ -238,7 +240,9 @@ final class MainWindowController: NSWindowController {
         offButton.action = #selector(runPerformanceOff)
         restoreButton.target = self
         restoreButton.action = #selector(runEmergencyRestore)
-        let buttons = NSStackView(views: [refreshButton, onButton, offButton, restoreButton])
+        advancedButton.target = self
+        advancedButton.action = #selector(showAdvanced)
+        let buttons = NSStackView(views: [refreshButton, onButton, offButton, restoreButton, advancedButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
         buttons.distribution = .fillProportionally
@@ -310,6 +314,14 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    @objc private func showAdvanced() {
+        if advancedWindowController == nil {
+            advancedWindowController = AdvancedWindowController()
+        }
+        advancedWindowController?.showWindow(nil)
+        advancedWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
     private func confirm(title: String, message: String, then action: @escaping () -> Void) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -367,6 +379,7 @@ final class MainWindowController: NSWindowController {
             offButton.isEnabled = false
             restoreButton.isEnabled = false
         }
+        advancedButton.isEnabled = true
     }
 
     private func appendOutput(_ text: String) {
@@ -377,6 +390,135 @@ final class MainWindowController: NSWindowController {
         outputTextView.textStorage?.append(NSAttributedString(string: text, attributes: attributes))
         outputTextView.needsDisplay = true
         outputTextView.scrollRangeToVisible(NSRange(location: outputTextView.string.count, length: 0))
+    }
+}
+
+
+final class AdvancedWindowController: NSWindowController {
+    private let preferences = UserDefaults.standard
+    private let preferenceKeys = [
+        "advanced.pauseSpotlightWhileOn",
+        "advanced.pauseTimeMachineWhileOn",
+        "advanced.preventPluggedInSleepWhileOn",
+        "advanced.preventDisplaySleepWhileOn"
+    ]
+
+    convenience init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "CatalinaPerformance Advanced"
+        self.init(window: window)
+        buildInterface()
+    }
+
+    private func buildInterface() {
+        guard let contentView = window?.contentView else { return }
+
+        let title = NSTextField(labelWithString: "Advanced")
+        title.font = NSFont.boldSystemFont(ofSize: 24)
+        let description = wrappedLabel("Planning and configuration UI only. These controls do not run scripts or change system behavior yet; Performance Mode remains controlled by the main Run Performance ON/OFF buttons.")
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(description)
+        stack.addArrangedSubview(section("Background Services", controls: [
+            plannedCheckbox("Pause Spotlight indexing while Performance Mode is ON", key: preferenceKeys[0]),
+            plannedCheckbox("Pause Time Machine while Performance Mode is ON", key: preferenceKeys[1]),
+            disabledCheckbox("Pause software update checks — Not implemented yet"),
+            disabledCheckbox("Pause selected launch agents — Not implemented yet")
+        ]))
+        stack.addArrangedSubview(section("Power Behavior", controls: [
+            plannedCheckbox("Prevent plugged-in sleep while Performance Mode is ON", key: preferenceKeys[2]),
+            plannedCheckbox("Prevent display sleep while Performance Mode is ON", key: preferenceKeys[3]),
+            disabledCheckbox("Prevent disk sleep — Not implemented yet"),
+            disabledCheckbox("Disable Power Nap — Not implemented yet")
+        ]))
+        stack.addArrangedSubview(section("App Priority", controls: [
+            disabledCheckbox("Boost selected foreground app — Not implemented yet"),
+            disabledCheckbox("Lower background app priority — Not implemented yet")
+        ]))
+        stack.addArrangedSubview(section("Memory / Storage", controls: [
+            disabledCheckbox("Show swap warning — Not implemented yet"),
+            disabledCheckbox("Show low disk warning — Not implemented yet"),
+            disabledCheckbox("Cache cleanup tools — Not implemented yet; future manual-only feature")
+        ]))
+        stack.addArrangedSubview(section("Thermal / Fan", controls: [
+            disabledCheckbox("Show fan RPM — Not implemented yet"),
+            disabledCheckbox("Show CPU temperature — Not implemented yet"),
+            disabledCheckbox("Aggressive fan behavior — Not implemented yet"),
+            disabledCheckbox("Max fans while Performance Mode is ON — Not implemented yet")
+        ]))
+        stack.addArrangedSubview(section("Experimental", controls: [
+            disabledCheckbox("Turbo Boost detection — Not implemented yet"),
+            disabledCheckbox("Turbo Boost control — Not implemented yet"),
+            disabledCheckbox("MSR read access — Not implemented yet"),
+            disabledCheckbox("Undervolting attempt — Not implemented yet"),
+            disabledCheckbox("Legacy kext support — Not implemented yet")
+        ]))
+        stack.addArrangedSubview(section("Emergency / Restore", controls: [
+            wrappedLabel("Emergency Restore remains available on the main screen and uses scripts/emergency_restore.sh. No additional restore behavior is controlled from this Advanced panel yet.")
+        ]))
+
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = stack
+        contentView.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
+            stack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor, constant: 16),
+            stack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -32)
+        ])
+    }
+
+    private func section(_ title: String, controls: [NSView]) -> NSView {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 15)
+        let stack = NSStackView(views: [titleLabel] + controls)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        return stack
+    }
+
+    private func plannedCheckbox(_ title: String, key: String) -> NSButton {
+        let checkbox = NSButton(checkboxWithTitle: title + " — preference only; no system changes yet", target: self, action: #selector(savePreference(_:)))
+        checkbox.identifier = NSUserInterfaceItemIdentifier(rawValue: key)
+        checkbox.state = preferences.bool(forKey: key) ? .on : .off
+        return checkbox
+    }
+
+    private func disabledCheckbox(_ title: String) -> NSButton {
+        let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+        checkbox.isEnabled = false
+        checkbox.state = .off
+        return checkbox
+    }
+
+    private func wrappedLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.maximumNumberOfLines = 0
+        return label
+    }
+
+    @objc private func savePreference(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        preferences.set(sender.state == .on, forKey: key)
     }
 }
 

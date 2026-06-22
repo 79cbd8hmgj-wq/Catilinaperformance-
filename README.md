@@ -28,7 +28,7 @@ Planned status indicators include:
 
 ## Non-Goals for Early Patches
 
-This repository now includes a minimal local macOS GUI shell. It does **not** implement a privileged helper, fan control, advanced options, launch daemon toggles, cache cleaning, undervolting, MSR changes, kext changes, SIP changes, or irreversible system tweaks. Future behavior should be built in small, reviewable patches after the safety model is documented.
+This repository now includes a minimal local macOS GUI shell. It does **not** implement a privileged helper, fan control, system-changing Advanced options, launch daemon toggles, cache cleaning, undervolting, MSR changes, kext changes, SIP changes, or irreversible system tweaks. Future behavior should be built in small, reviewable patches after the safety model is documented.
 
 ## Safety Principles
 
@@ -81,8 +81,9 @@ A minimal macOS GUI shell now lives in `app/CatalinaPerformance`. It is a Swift 
 
 The GUI is intentionally thin:
 
-- It displays the CatalinaPerformance app name, a Performance Mode ON/OFF switch, a small detected-state label, a success/failure status area, script output, and buttons for status refresh, Performance ON, Performance OFF, Emergency Restore, and an Advanced placeholder.
-- The Advanced area is only a placeholder and says: `Advanced options are not implemented yet.`
+- It displays the CatalinaPerformance app name, a Performance Mode ON/OFF switch, a small detected-state label, a success/failure status area, script output, and buttons for status refresh, Performance ON, Performance OFF, Emergency Restore, and Advanced.
+- The Advanced window is now a planning/configuration UI organized into Background Services, Power Behavior, App Priority, Memory / Storage, Thermal / Fan, Experimental, and Emergency / Restore sections.
+- Most Advanced controls are disabled placeholders clearly labeled `Not implemented yet`; the few selectable planning checkboxes save local UserDefaults preferences only and do not affect `performance_on.sh`, `performance_off.sh`, `emergency_restore.sh`, or `status_report.sh`.
 - It calls the existing scripts in `scripts/` instead of duplicating system-changing logic.
 - It detects Performance Mode by checking `.catalina_performance_state/performance_mode_on`, then disables Performance ON while the marker exists and disables Performance OFF while the marker is absent. Emergency Restore remains available.
 - It prints the exact `/bin/sh ...` command for each script, captures stdout and stderr in the scrollable output area, auto-scrolls after each run, and updates the status label with success or failure.
@@ -150,7 +151,7 @@ The packaged `.app` is for local development only:
 - It is not installed into `/Applications` automatically.
 - The repository checkout must remain available because the app launcher points the GUI at the repo's `scripts/` directory.
 - If the repository is moved after packaging, re-run `scripts/package_app.sh` so the generated launcher records the new scripts path.
-- Advanced options remain placeholder-only; there is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
+- Advanced options remain planning/configuration-only; most controls are disabled placeholders, and no new system-changing behavior has been added. There is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
 
 ### Xcode 12.4 and Catalina Notes
 
@@ -189,6 +190,7 @@ See [docs/GUI_TESTING.md](docs/GUI_TESTING.md) for the current manual GUI test f
 3. With `.catalina_performance_state/performance_mode_on` absent, confirm the state label says **Performance Mode appears OFF**, **Run Performance OFF** is disabled, **Run Performance ON** is enabled, and **Emergency Restore** remains enabled.
 4. Create or preserve the marker file only through the reviewed scripts when possible. After running **Run Performance ON**, confirm the GUI refreshes the switch and state label from `.catalina_performance_state/performance_mode_on`, disables **Run Performance ON**, and keeps output scrolled to the latest exit-status line.
 5. After running **Run Performance OFF** or **Emergency Restore**, confirm the marker is removed, the switch and label show OFF, **Run Performance OFF** is disabled, and **Emergency Restore** remains enabled.
-6. Repeat an ON/OFF cycle and verify each run reports a clear success or failure in the status label without adding fan control, cache cleaning, SIP changes, launch daemon controls, privileged helpers, or advanced options.
+6. Open **Advanced** and confirm the panel shows planning sections for Background Services, Power Behavior, App Priority, Memory / Storage, Thermal / Fan, Experimental, and Emergency / Restore. Confirm disabled controls are labeled **Not implemented yet** and any selectable planning preferences do not run scripts or affect Performance ON/OFF behavior.
+7. Repeat an ON/OFF cycle and verify each run reports a clear success or failure in the status label without adding fan control, cache cleaning, SIP changes, launch daemon controls, privileged helpers, or system-changing Advanced behavior.
 
 Future packaged `.app` work should keep the same app/script boundary: the GUI may collect user intent and display output, while reversible system behavior and restore paths remain in reviewed scripts.
