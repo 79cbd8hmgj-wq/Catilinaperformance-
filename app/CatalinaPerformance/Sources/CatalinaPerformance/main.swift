@@ -18,16 +18,16 @@ final class ScriptRunner {
         }
     }
 
-    func command(for script: ScriptKind) -> String {
+    func scriptCommand(for script: ScriptKind) -> String {
         let scriptURL = resolveScript(named: script.fileName)
         return (["/bin/sh", scriptURL.path] + script.arguments).joined(separator: " ")
     }
 
     func run(_ script: ScriptKind, completion: @escaping (ScriptResult) -> Void) {
         let scriptURL = resolveScript(named: script.fileName)
-        let command = command(for: script)
+        let launchCommand = scriptCommand(for: script)
         guard fileManager.isExecutableFile(atPath: scriptURL.path) || fileManager.fileExists(atPath: scriptURL.path) else {
-            completion(ScriptResult(command: command, output: "Script not found: \(scriptURL.path)\nSet CATALINA_PERFORMANCE_SCRIPTS_DIR to the repository scripts directory during development.", exitStatus: nil))
+            completion(ScriptResult(command: launchCommand, output: "Script not found: \(scriptURL.path)\nSet CATALINA_PERFORMANCE_SCRIPTS_DIR to the repository scripts directory during development.", exitStatus: nil))
             return
         }
 
@@ -42,16 +42,16 @@ final class ScriptRunner {
         do {
             try process.run()
         } catch {
-            completion(ScriptResult(command: command, output: "Failed to start \(script.fileName): \(error.localizedDescription)", exitStatus: nil))
+            completion(ScriptResult(command: launchCommand, output: "Failed to start \(script.fileName): \(error.localizedDescription)", exitStatus: nil))
             return
         }
 
         process.terminationHandler = { process in
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
-            DispatchQueue.main.async {
-                completion(ScriptResult(command: command, output: output, exitStatus: process.terminationStatus))
-            }
+            DispatchQueue.main.async(execute: {
+                completion(ScriptResult(command: launchCommand, output: output, exitStatus: process.terminationStatus))
+            })
         }
     }
 
@@ -265,7 +265,7 @@ final class MainWindowController: NSWindowController {
     private func run(_ script: ScriptKind, status: String) {
         statusLabel.stringValue = "Status: \(status)"
         setRunButtonsEnabled(false)
-        appendOutput("\n$ \(runner.command(for: script))\n")
+        appendOutput("\n$ \(runner.scriptCommand(for: script))\n")
         runner.run(script) { [weak self] result in
             guard let self = self else { return }
             let output = result.output.isEmpty ? "(No output.)\n" : result.output
