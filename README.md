@@ -62,6 +62,7 @@ See [docs/SAFETY_RULES.md](docs/SAFETY_RULES.md) for the detailed safety contrac
 │       └── Sources/CatalinaPerformance/main.swift
 └── scripts/
     ├── build_gui.sh
+    ├── package_app.sh
     ├── emergency_restore.sh
     ├── performance_off.sh
     ├── performance_on.sh
@@ -72,7 +73,7 @@ See [docs/SAFETY_RULES.md](docs/SAFETY_RULES.md) for the detailed safety contrac
 
 ## Current Status
 
-Initial documentation, safe script scaffolding, and a minimal local GUI shell are present. Production packaging and privileged helper behavior are not implemented yet.
+Initial documentation, safe script scaffolding, a minimal local GUI shell, and a local development `.app` packaging helper are present. Privileged helper behavior is not implemented yet.
 
 ## Local GUI Development
 
@@ -98,7 +99,7 @@ Use the local build helper from anywhere inside or outside the repository:
 
 The helper only verifies the local developer tools and runs `swift build` in `app/CatalinaPerformance`; it does not change system settings or apply Performance Mode. It checks that an Xcode developer directory is selected, that `xcrun` can locate `xctest`, and that `swift` is available before building the package.
 
-### Running the GUI
+### Running the GUI from Terminal
 
 Use the local run helper from anywhere inside or outside the repository:
 
@@ -114,6 +115,42 @@ You can also run the package manually from a macOS Catalina development machine 
 cd app/CatalinaPerformance
 CATALINA_PERFORMANCE_SCRIPTS_DIR=/path/to/Catilinaperformance-/scripts swift run CatalinaPerformance
 ```
+
+### Packaging the Local `.app`
+
+Use the local packaging helper from anywhere inside or outside the repository:
+
+```sh
+/path/to/Catilinaperformance-/scripts/package_app.sh
+```
+
+The packaging helper verifies that full Xcode is selected with `xcode-select`, confirms `xcrun` can find `xctest`, confirms `swift` is available, checks that the required GUI and performance scripts exist, runs `swift build`, then creates a local app bundle at:
+
+```text
+build/CatalinaPerformance.app
+```
+
+The generated bundle contains a simple `Info.plist`, the built Swift GUI executable, and a local launcher in `Contents/MacOS/`. The launcher preserves `CATALINA_PERFORMANCE_SCRIPTS_DIR` if it is already set; otherwise, it sets that environment variable to this checkout's `scripts/` directory so the GUI can find `status_report.sh`, `performance_on.sh`, `performance_off.sh`, and `emergency_restore.sh`.
+
+### Launching the Packaged `.app`
+
+After packaging, launch the app from Terminal with:
+
+```sh
+open /path/to/Catilinaperformance-/build/CatalinaPerformance.app
+```
+
+You may also double-click `build/CatalinaPerformance.app` in Finder on the development Mac. The packaged app uses the same GUI and scripts as `scripts/run_gui.sh`; it does not install anything into `/Applications`, does not add a privileged helper, does not add code signing or notarization, and does not change performance behavior.
+
+### Current `.app` Limitations
+
+The packaged `.app` is for local development only:
+
+- It is unsigned and not notarized.
+- It is not installed into `/Applications` automatically.
+- The repository checkout must remain available because the app launcher points the GUI at the repo's `scripts/` directory.
+- If the repository is moved after packaging, re-run `scripts/package_app.sh` so the generated launcher records the new scripts path.
+- Advanced options remain placeholder-only; there is no fan control, cache cleaning, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
 
 ### Xcode 12.4 and Catalina Notes
 
