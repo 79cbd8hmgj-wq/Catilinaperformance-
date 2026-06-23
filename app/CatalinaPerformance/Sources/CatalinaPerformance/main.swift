@@ -510,7 +510,7 @@ final class AdvancedWindowController: NSWindowController {
 
     convenience init(onRunAppPriorityReport: (() -> Void)? = nil, onRunMemoryStorageCheck: (() -> Void)? = nil, onRunThermalFanCheck: (() -> Void)? = nil, onPreferenceWriteFailure: ((String) -> Void)? = nil) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -536,7 +536,8 @@ final class AdvancedWindowController: NSWindowController {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
+        stack.spacing = 18
+        stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(description)
@@ -598,7 +599,11 @@ final class AdvancedWindowController: NSWindowController {
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .textBackgroundColor
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = stack
         contentView.addSubview(scrollView)
@@ -608,21 +613,48 @@ final class AdvancedWindowController: NSWindowController {
             scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
             scrollView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
-            stack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor, constant: 16),
-            stack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -32)
+            stack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            stack.bottomAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
         ])
     }
 
     private func section(_ title: String, controls: [NSView]) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = NSFont.boldSystemFont(ofSize: 15)
-        let stack = NSStackView(views: [titleLabel] + controls)
+        titleLabel.font = NSFont.boldSystemFont(ofSize: 16)
+        titleLabel.textColor = .labelColor
+
+        let divider = NSBox()
+        divider.boxType = .separator
+
+        let header = NSStackView(views: [titleLabel, divider])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 6
+
+        let stack = NSStackView(views: [header] + controls)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 6
-        return stack
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+
+        let box = NSBox()
+        box.boxType = .custom
+        box.borderType = .lineBorder
+        box.cornerRadius = 6
+        box.borderColor = .separatorColor
+        box.fillColor = .controlBackgroundColor
+        box.contentView = stack
+        box.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            stack.widthAnchor.constraint(equalTo: box.widthAnchor),
+            divider.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+
+        return box
     }
 
     private func advancedCheckbox(_ title: String, key: String) -> NSButton {
@@ -636,6 +668,14 @@ final class AdvancedWindowController: NSWindowController {
         let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
         checkbox.isEnabled = false
         checkbox.state = .off
+        checkbox.toolTip = "Placeholder only; this control is intentionally disabled and does not change the system."
+        checkbox.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: NSColor.disabledControlTextColor
+            ]
+        )
         return checkbox
     }
 
@@ -648,6 +688,7 @@ final class AdvancedWindowController: NSWindowController {
     private func wrappedLabel(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
         label.maximumNumberOfLines = 0
+        label.textColor = .secondaryLabelColor
         return label
     }
 
