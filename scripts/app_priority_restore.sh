@@ -35,20 +35,28 @@ identity_mismatch() {
     current_full_command=$(ps -p "$pid" -o args= 2>/dev/null | sed -n '1p' || printf '')
     current_start_time=$(ps -p "$pid" -o lstart= 2>/dev/null | sed -n '1p' || printf '')
 
-    if [ -n "$saved_owner" ] && [ "$saved_owner" != "$current_owner" ]; then
-        log "Skipped PID=$pid: stale PID / identity mismatch; saved owner=$saved_owner current owner=$current_owner."
+    if [ -z "$saved_owner" ] || [ -z "$saved_command" ] || [ -z "$saved_start_time" ]; then
+        log "Skipped stale PID / identity mismatch for PID=$pid: saved owner, command, or start time is missing."
         return 0
     fi
-    if [ -n "$saved_command" ] && [ "$saved_command" != "$current_command" ]; then
-        log "Skipped PID=$pid: stale PID / identity mismatch; saved command=$saved_command current command=$current_command."
+    if [ -z "$current_owner" ] || [ -z "$current_command" ] || [ -z "$current_start_time" ]; then
+        log "Skipped stale PID / identity mismatch for PID=$pid: current owner, command, or start time could not be read."
         return 0
     fi
-    if [ -n "$saved_start_time" ] && [ -n "$current_start_time" ] && [ "$saved_start_time" != "$current_start_time" ]; then
-        log "Skipped PID=$pid: stale PID / identity mismatch; saved start time=$saved_start_time current start time=$current_start_time."
+    if [ "$saved_owner" != "$current_owner" ]; then
+        log "Skipped stale PID / identity mismatch for PID=$pid: saved owner=$saved_owner current owner=$current_owner."
+        return 0
+    fi
+    if [ "$saved_command" != "$current_command" ]; then
+        log "Skipped stale PID / identity mismatch for PID=$pid: saved command=$saved_command current command=$current_command."
+        return 0
+    fi
+    if [ "$saved_start_time" != "$current_start_time" ]; then
+        log "Skipped stale PID / identity mismatch for PID=$pid: saved start time=$saved_start_time current start time=$current_start_time."
         return 0
     fi
     if [ -n "$saved_full_command" ] && [ -n "$current_full_command" ] && [ "$saved_full_command" != "$current_full_command" ]; then
-        log "Skipped PID=$pid: stale PID / identity mismatch; saved full command differs from current full command."
+        log "Skipped stale PID / identity mismatch for PID=$pid: saved full command differs from current full command."
         return 0
     fi
 

@@ -83,7 +83,9 @@ state_matches_current() {
     [ "$(read_key COMMAND "$file")" = "$COMMAND_NAME" ] || return 1
     saved_start=$(read_key START_TIME "$file")
     saved_full=$(read_key FULL_COMMAND "$file")
-    if [ -n "$saved_start" ] && [ -n "$START_TIME" ] && [ "$saved_start" != "$START_TIME" ]; then return 1; fi
+    [ -n "$saved_start" ] || return 1
+    [ -n "$START_TIME" ] || return 1
+    if [ "$saved_start" != "$START_TIME" ]; then return 1; fi
     if [ -n "$saved_full" ] && [ -n "$FULL_COMMAND" ] && [ "$saved_full" != "$FULL_COMMAND" ]; then return 1; fi
     return 0
 }
