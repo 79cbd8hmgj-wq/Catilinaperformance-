@@ -158,12 +158,16 @@ final class ScriptRunner {
 struct AdvancedPreferences {
     static let pauseSpotlightKey = "advanced.pauseSpotlightWhileOn"
     static let pauseTimeMachineKey = "advanced.pauseTimeMachineWhileOn"
+    static let preventSystemSleepKey = "advanced.preventPluggedInSystemSleepWhileOn"
+    static let preventDisplaySleepKey = "advanced.preventDisplaySleepWhileOn"
     static let configFileName = "advanced_preferences.env"
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
         defaults.register(defaults: [
             pauseSpotlightKey: true,
-            pauseTimeMachineKey: true
+            pauseTimeMachineKey: true,
+            preventSystemSleepKey: true,
+            preventDisplaySleepKey: true
         ])
     }
 
@@ -182,7 +186,9 @@ struct AdvancedPreferences {
     static func writeScriptConfig(defaults: UserDefaults = .standard) -> Result<URL, Error> {
         let spotlight = defaults.bool(forKey: pauseSpotlightKey) ? "1" : "0"
         let timeMachine = defaults.bool(forKey: pauseTimeMachineKey) ? "1" : "0"
-        let contents = "# CatalinaPerformance Advanced Background Services preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\n"
+        let systemSleep = defaults.bool(forKey: preventSystemSleepKey) ? "1" : "0"
+        let displaySleep = defaults.bool(forKey: preventDisplaySleepKey) ? "1" : "0"
+        let contents = "# CatalinaPerformance Advanced preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\nPREVENT_SYSTEM_SLEEP_WHILE_ON=\(systemSleep)\nPREVENT_DISPLAY_SLEEP_WHILE_ON=\(displaySleep)\n"
 
         do {
             try FileManager.default.createDirectory(at: configDirectoryURL, withIntermediateDirectories: true)
@@ -472,7 +478,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Configure which existing background-service pauses Performance Mode applies. Changes are saved locally and read by performance_on.sh the next time Performance Mode is turned ON.")
+        let description = wrappedLabel("Configure which existing background-service pauses and power-management changes Performance Mode applies. Changes are saved locally and read by performance_on.sh the next time Performance Mode is turned ON.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -482,16 +488,17 @@ final class AdvancedWindowController: NSWindowController {
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(description)
         stack.addArrangedSubview(section("Background Services", controls: [
-            backgroundServiceCheckbox("Pause Spotlight indexing while Performance Mode is ON", key: AdvancedPreferences.pauseSpotlightKey),
-            backgroundServiceCheckbox("Pause Time Machine automatic backups while Performance Mode is ON", key: AdvancedPreferences.pauseTimeMachineKey),
+            advancedCheckbox("Pause Spotlight indexing while Performance Mode is ON", key: AdvancedPreferences.pauseSpotlightKey),
+            advancedCheckbox("Pause Time Machine automatic backups while Performance Mode is ON", key: AdvancedPreferences.pauseTimeMachineKey),
             disabledCheckbox("Pause software update checks — Not implemented yet"),
             disabledCheckbox("Pause selected launch agents — Not implemented yet")
         ]))
         stack.addArrangedSubview(section("Power Behavior", controls: [
-            disabledCheckbox("Prevent plugged-in sleep while Performance Mode is ON — Not configurable yet"),
-            disabledCheckbox("Prevent display sleep while Performance Mode is ON — Not configurable yet"),
+            advancedCheckbox("Prevent plugged-in system sleep while Performance Mode is ON", key: AdvancedPreferences.preventSystemSleepKey),
+            advancedCheckbox("Prevent display sleep while Performance Mode is ON", key: AdvancedPreferences.preventDisplaySleepKey),
             disabledCheckbox("Prevent disk sleep — Not implemented yet"),
-            disabledCheckbox("Disable Power Nap — Not implemented yet")
+            disabledCheckbox("Disable Power Nap — Not implemented yet"),
+            disabledCheckbox("Keep network awake — Not implemented yet")
         ]))
         stack.addArrangedSubview(section("App Priority", controls: [
             disabledCheckbox("Boost selected foreground app — Not implemented yet"),
@@ -548,7 +555,7 @@ final class AdvancedWindowController: NSWindowController {
         return stack
     }
 
-    private func backgroundServiceCheckbox(_ title: String, key: String) -> NSButton {
+    private func advancedCheckbox(_ title: String, key: String) -> NSButton {
         let checkbox = NSButton(checkboxWithTitle: title, target: self, action: #selector(savePreference(_:)))
         checkbox.identifier = NSUserInterfaceItemIdentifier(rawValue: key)
         checkbox.state = preferences.bool(forKey: key) ? .on : .off
