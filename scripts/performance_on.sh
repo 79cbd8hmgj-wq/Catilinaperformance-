@@ -25,6 +25,8 @@ ACTIONS_FILE="$STATE_DIR/actions_taken.txt"
 PREFERENCES_FILE="${CATALINA_PERFORMANCE_PREFERENCES_FILE:-${HOME:-}/Library/Application Support/CatalinaPerformance/advanced_preferences.env}"
 PAUSE_SPOTLIGHT_WHILE_ON=1
 PAUSE_TIME_MACHINE_WHILE_ON=1
+PREVENT_SYSTEM_SLEEP_WHILE_ON=1
+PREVENT_DISPLAY_SLEEP_WHILE_ON=1
 
 FORCE=0
 ASSUME_YES=0
@@ -110,13 +112,16 @@ read_boolean_preference() {
 
 validate_preferences_file() {
     if [ ! -f "$PREFERENCES_FILE" ]; then
-        log "Advanced preferences file not found at $PREFERENCES_FILE; defaulting background-service pauses to enabled."
+        log "Advanced preferences file not found at $PREFERENCES_FILE; defaulting configurable Advanced actions to enabled."
         return 0
     fi
 
     awk -F= '
         /^[[:space:]]*($|#)/ { next }
-        $1 == "PAUSE_SPOTLIGHT_WHILE_ON" || $1 == "PAUSE_TIME_MACHINE_WHILE_ON" { next }
+        $1 == "PAUSE_SPOTLIGHT_WHILE_ON" || \
+        $1 == "PAUSE_TIME_MACHINE_WHILE_ON" || \
+        $1 == "PREVENT_SYSTEM_SLEEP_WHILE_ON" || \
+        $1 == "PREVENT_DISPLAY_SLEEP_WHILE_ON" { next }
         { bad=1 }
         END { exit bad ? 1 : 0 }
     ' "$PREFERENCES_FILE" 2>/dev/null || log "Warning: Advanced preferences file $PREFERENCES_FILE contains malformed or unknown entries; only known keys will be read."
@@ -126,7 +131,9 @@ load_preferences() {
     validate_preferences_file
     PAUSE_SPOTLIGHT_WHILE_ON=$(read_boolean_preference PAUSE_SPOTLIGHT_WHILE_ON 1)
     PAUSE_TIME_MACHINE_WHILE_ON=$(read_boolean_preference PAUSE_TIME_MACHINE_WHILE_ON 1)
-    log "Advanced Background Services preferences: Pause Spotlight=$PAUSE_SPOTLIGHT_WHILE_ON, Pause Time Machine=$PAUSE_TIME_MACHINE_WHILE_ON."
+    PREVENT_SYSTEM_SLEEP_WHILE_ON=$(read_boolean_preference PREVENT_SYSTEM_SLEEP_WHILE_ON 1)
+    PREVENT_DISPLAY_SLEEP_WHILE_ON=$(read_boolean_preference PREVENT_DISPLAY_SLEEP_WHILE_ON 1)
+    log "Advanced preferences: Pause Spotlight=$PAUSE_SPOTLIGHT_WHILE_ON, Pause Time Machine=$PAUSE_TIME_MACHINE_WHILE_ON, Prevent system sleep=$PREVENT_SYSTEM_SLEEP_WHILE_ON, Prevent display sleep=$PREVENT_DISPLAY_SLEEP_WHILE_ON."
 }
 
 run_privileged() {
@@ -160,11 +167,11 @@ confirm_intent() {
     cat <<WARNING
 CatalinaPerformance will turn Performance Mode ON.
 
-Planned reversible changes on macOS, when the required commands exist:
-- Save current pmset settings, then prevent system sleep while plugged in.
-- Prevent display sleep while Performance Mode is active.
-- Pause Time Machine automatic backups.
-- Pause Spotlight indexing on the boot volume.
+Planned reversible changes on macOS, when the required commands exist and Advanced preferences allow them:
+- Save current pmset settings, then optionally prevent system sleep while plugged in.
+- Optionally prevent display sleep while Performance Mode is active.
+- Optionally pause Time Machine automatic backups.
+- Optionally pause Spotlight indexing on the boot volume.
 
 This script will not modify SIP, delete caches, permanently disable services,
 touch fan control, undervolt, use MSR code, load kexts, or install third-party tools.
@@ -202,10 +209,10 @@ save_pmset_state() {
     {
         printf '#!/bin/sh\n'
         printf '# Generated before enabling Performance Mode. Intended for performance_off.sh.\n'
-        if [ -n "$current_sleep" ]; then
+        if [ "$PREVENT_SYSTEM_SLEEP_WHILE_ON" = "1" ] && [ -n "$current_sleep" ]; then
             printf 'pmset -c sleep %s\n' "$current_sleep"
         fi
-        if [ -n "$current_displaysleep" ]; then
+        if [ "$PREVENT_DISPLAY_SLEEP_WHILE_ON" = "1" ] && [ -n "$current_displaysleep" ]; then
             printf 'pmset -c displaysleep %s\n' "$current_displaysleep"
         fi
     } > "$PMSET_RESTORE_FILE"
@@ -218,8 +225,25 @@ apply_pmset_changes() {
         return 0
     fi
 
-    run_privileged "prevent system and display sleep while plugged in" pmset -c sleep 0 displaysleep 0
-    record_action "Changed pmset AC power settings: sleep=0, displaysleep=0."
+    pmset_args=""
+    if [ "$PREVENT_SYSTEM_SLEEP_WHILE_ON" = "1" ]; then
+        pmset_args="$pmset_args sleep 0"
+    else
+        record_action "Skipped plugged-in system sleep change: Advanced preference disabled by user."
+    fi
+    if [ "$PREVENT_DISPLAY_SLEEP_WHILE_ON" = "1" ]; then
+        pmset_args="$pmset_args displaysleep 0"
+    else
+        record_action "Skipped display sleep change: Advanced preference disabled by user."
+    fi
+
+    if [ -z "$pmset_args" ]; then
+        return 0
+    fi
+
+    # shellcheck disable=SC2086
+    run_privileged "apply selected plugged-in power-management preferences" pmset -c $pmset_args
+    record_action "Changed pmset AC power settings:$pmset_args."
 }
 
 save_time_machine_state() {
