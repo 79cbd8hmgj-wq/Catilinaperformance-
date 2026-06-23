@@ -164,7 +164,6 @@ struct AdvancedPreferences {
     static let showLowDiskSpaceWarningKey = "advanced.showLowDiskSpaceWarning"
     static let showMemoryPressureSummaryKey = "advanced.showMemoryPressureSummary"
     static let showTopMemoryProcessesKey = "advanced.showTopMemoryProcesses"
-    static let appPriorityBoostEnabledKey = "advanced.appPriorityBoostEnabled"
     static let appPriorityLastPIDKey = "advanced.appPriorityLastPID"
     static let appPriorityLastNameKey = "advanced.appPriorityLastName"
     static let configFileName = "advanced_preferences.env"
@@ -178,8 +177,7 @@ struct AdvancedPreferences {
             showSwapUsageWarningKey: true,
             showLowDiskSpaceWarningKey: true,
             showMemoryPressureSummaryKey: true,
-            showTopMemoryProcessesKey: true,
-            appPriorityBoostEnabledKey: false
+            showTopMemoryProcessesKey: true
         ])
     }
 
@@ -204,8 +202,7 @@ struct AdvancedPreferences {
         let diskWarning = defaults.bool(forKey: showLowDiskSpaceWarningKey) ? "1" : "0"
         let memoryPressure = defaults.bool(forKey: showMemoryPressureSummaryKey) ? "1" : "0"
         let topMemoryProcesses = defaults.bool(forKey: showTopMemoryProcessesKey) ? "1" : "0"
-        let appPriorityBoost = defaults.bool(forKey: appPriorityBoostEnabledKey) ? "1" : "0"
-        let contents = "# CatalinaPerformance Advanced preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\nPREVENT_SYSTEM_SLEEP_WHILE_ON=\(systemSleep)\nPREVENT_DISPLAY_SLEEP_WHILE_ON=\(displaySleep)\nSHOW_SWAP_USAGE_WARNING=\(swapWarning)\nSHOW_LOW_DISK_SPACE_WARNING=\(diskWarning)\nSHOW_MEMORY_PRESSURE_SUMMARY=\(memoryPressure)\nSHOW_TOP_MEMORY_PROCESSES=\(topMemoryProcesses)\nAPP_PRIORITY_BOOST_ENABLED=\(appPriorityBoost)\n"
+        let contents = "# CatalinaPerformance Advanced preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\nPREVENT_SYSTEM_SLEEP_WHILE_ON=\(systemSleep)\nPREVENT_DISPLAY_SLEEP_WHILE_ON=\(displaySleep)\nSHOW_SWAP_USAGE_WARNING=\(swapWarning)\nSHOW_LOW_DISK_SPACE_WARNING=\(diskWarning)\nSHOW_MEMORY_PRESSURE_SUMMARY=\(memoryPressure)\nSHOW_TOP_MEMORY_PROCESSES=\(topMemoryProcesses)\n"
 
         do {
             try FileManager.default.createDirectory(at: configDirectoryURL, withIntermediateDirectories: true)
@@ -679,13 +676,13 @@ final class AdvancedWindowController: NSWindowController {
         appPriorityPopup.addItem(withTitle: "Refresh to load running user processes")
         apply.isEnabled = false
         return [
-            wrappedLabel("Select exactly one user-owned process. CatalinaPerformance saves its original nice value before applying a conservative boost and restores it when requested or during Performance Mode OFF."),
+            wrappedLabel("App Priority is manual-only in this version. Select exactly one user-owned process, then use Apply Priority Boost Now. Performance Mode OFF will attempt to restore any successfully applied manual boost."),
             refresh,
             appPriorityPopup,
             appPriorityDetailsLabel,
-            advancedCheckbox("Enable selected app priority boost while Performance Mode is ON", key: AdvancedPreferences.appPriorityBoostEnabledKey),
             apply,
             restore,
+            disabledCheckbox("Auto-boost selected app when Performance Mode turns ON — Not implemented yet"),
             disabledCheckbox("Lower background app priority — Not implemented yet"),
             disabledCheckbox("Auto-detect emulator/game/browser — Not implemented yet"),
             disabledCheckbox("Boost process tree — Not implemented yet"),

@@ -92,6 +92,7 @@ state_matches_current() {
 
 write_state() {
     status=$1
+    tmp_file="$STATE_FILE.tmp.$$"
     {
         printf 'PID=%s\n' "$PID"
         printf 'OWNER=%s\n' "$OWNER"
@@ -102,7 +103,25 @@ write_state() {
         printf 'TARGET_NICE=%s\n' "$TARGET_NICE"
         printf 'APPLY_STATUS=%s\n' "$status"
         printf 'APPLIED_AT=%s\n' "$(date '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null || printf unknown-time)"
-    } > "$STATE_FILE"
+    } > "$tmp_file" && mv "$tmp_file" "$STATE_FILE"
+}
+
+abort_without_state() {
+    printf 'Aborted: could not save restore state before applying priority boost.\n' >&2
+    printf 'No priority change was attempted. Check permissions for: %s\n' "$STATE_DIR" >&2
+    exit 1
+}
+
+verify_state_saved() {
+    if [ ! -f "$STATE_FILE" ] || [ ! -r "$STATE_FILE" ]; then
+        return 1
+    fi
+    [ "$(read_key PID "$STATE_FILE")" = "$PID" ] || return 1
+    [ "$(read_key OWNER "$STATE_FILE")" = "$OWNER" ] || return 1
+    [ "$(read_key COMMAND "$STATE_FILE")" = "$COMMAND_NAME" ] || return 1
+    [ -n "$(read_key ORIGINAL_NICE "$STATE_FILE")" ] || return 1
+    [ -n "$(read_key APPLY_STATUS "$STATE_FILE")" ] || return 1
+    return 0
 }
 
 mark_state_status() {
@@ -113,7 +132,7 @@ mark_state_status() {
     fi
 }
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" || abort_without_state
 STATE_FILE="$STATE_DIR/$PID.state"
 if [ -f "$STATE_FILE" ]; then
     if state_matches_current "$STATE_FILE"; then
@@ -124,11 +143,12 @@ if [ -f "$STATE_FILE" ]; then
         archive_file="$ARCHIVE_DIR/$PID.stale.$(date +%Y%m%d%H%M%S 2>/dev/null || printf time).state"
         mv "$STATE_FILE" "$archive_file" || { printf 'Refusing to continue: unable to archive stale state file %s.\n' "$STATE_FILE" >&2; exit 1; }
         log "Archived stale app-priority state for reused PID=$PID to $archive_file before applying a new boost."
-        write_state pending
+        write_state pending || abort_without_state
     fi
 else
-    write_state pending
+    write_state pending || abort_without_state
 fi
+verify_state_saved || abort_without_state
 
 if [ "$ASSUME_YES" -ne 1 ]; then
     printf 'Apply conservative priority boost to PID %s (%s), owner %s, nice %s -> %s? [y/N] ' "$PID" "$COMMAND_NAME" "$OWNER" "$ORIGINAL_NICE" "$TARGET_NICE"

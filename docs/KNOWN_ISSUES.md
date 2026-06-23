@@ -24,6 +24,7 @@ CatalinaPerformance should continue to avoid SIP changes, automatic cache deleti
 
 ## App Priority Limitations
 
+- Selected PIDs are not auto-boosted when Performance Mode turns ON; App Priority is manual-only and intentionally conservative in this version.
 - Priority boosting may not noticeably improve every app; CPU, GPU, memory pressure, disk I/O, thermal throttling, or the app's own workload may be the real bottleneck.
 - Setting a negative nice value can require administrator authorization on macOS, even for a user-owned process; CatalinaPerformance should request that authorization only for the narrow `renice` operation.
 - Protected and system processes are intentionally blocked, including critical services such as `launchd`, `kernel_task`, `WindowServer`, `loginwindow`, Spotlight metadata services, backup services, security, audio, network configuration, Bluetooth, and Open Directory services.
