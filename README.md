@@ -28,7 +28,7 @@ Planned status indicators include:
 
 ## Non-Goals for Early Patches
 
-This repository now includes a minimal local macOS GUI shell. It does **not** implement a privileged helper, fan control, system-changing Advanced options, launch daemon toggles, cache cleaning, undervolting, MSR changes, kext changes, SIP changes, or irreversible system tweaks. Future behavior should be built in small, reviewable patches after the safety model is documented.
+This repository now includes a minimal local macOS GUI shell. It does **not** implement a privileged helper, fan control, broad automatic Advanced system changes, launch daemon toggles, cache cleaning, undervolting, MSR changes, kext changes, SIP changes, or irreversible system tweaks. Future behavior should be built in small, reviewable patches after the safety model is documented.
 
 ## Safety Principles
 
@@ -157,7 +157,7 @@ The packaged `.app` is for local development only:
 - It is not installed into `/Applications` automatically.
 - The repository checkout must remain available because the app launcher points the GUI at the repo's `scripts/` directory.
 - If the repository is moved after packaging, re-run `scripts/package_app.sh` so the generated launcher records the new scripts path.
-- Advanced options are limited to configuring whether the existing Spotlight pause, Time Machine pause, plugged-in system sleep prevention, and display sleep prevention steps run, plus manual read-only Memory / Storage reporting. Most other controls are disabled placeholders, and no additional system-changing behavior has been added. There is no fan control, cache cleaning, browser cleanup, automatic cleanup, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
+- Advanced options are limited to configuring whether the existing Spotlight pause, Time Machine pause, plugged-in system sleep prevention, and display sleep prevention steps run, manual read-only Memory / Storage reporting, and one explicitly selected App Priority process boost with saved restore state. Most other controls are disabled placeholders, and no broad automatic system-changing behavior has been added. There is no fan control, cache cleaning, browser cleanup, automatic cleanup, launch daemon control, privileged helper, SIP modification, undervolting, MSR access, kext loading, or experimental CPU feature control.
 
 ### Xcode 12.4 and Catalina Notes
 
@@ -198,6 +198,25 @@ See [docs/GUI_TESTING.md](docs/GUI_TESTING.md) for the current manual GUI test f
 5. After running **Run Performance OFF** or **Emergency Restore**, confirm the marker is removed, the switch and label show OFF, **Run Performance OFF** is disabled, and **Emergency Restore** remains enabled.
 6. Open **Advanced** and confirm the panel shows planning sections for Background Services, Power Behavior, App Priority, Memory / Storage, Thermal / Fan, Experimental, and Emergency / Restore. Confirm disabled controls are labeled **Not implemented yet**. Toggle the selectable Background Services, Power Behavior, and Memory / Storage preferences and confirm they save to `~/Library/Application Support/CatalinaPerformance/advanced_preferences.env` without running system-changing scripts immediately; only the Background Services and Power Behavior preferences affect the next Performance ON run.
 7. In **Advanced > Memory / Storage**, click **Run Memory / Storage Check** and confirm the main output area shows `scripts/memory_storage_report.sh` output for the enabled read-only checks. Confirm cache cleanup, browser cache cleanup, automatic cleanup, and top disk-heavy folder scanning remain disabled placeholders and that no files are deleted.
-8. Repeat an ON/OFF cycle and verify each run reports a clear success or failure in the status label without adding fan control, cache cleaning, SIP changes, launch daemon controls, privileged helpers, or system-changing Advanced behavior.
+8. Repeat an ON/OFF cycle and verify each run reports a clear success or failure in the status label without adding fan control, cache cleaning, SIP changes, launch daemon controls, privileged helpers, or broad automatic Advanced behavior.
 
 Future packaged `.app` work should keep the same app/script boundary: the GUI may collect user intent and display output, while reversible system behavior and restore paths remain in reviewed scripts.
+
+## Advanced App Priority
+
+The Advanced App Priority section is functional but intentionally narrow. It lists running user-owned processes with PID, process name, nice value, CPU %, memory %, and owner, then lets the user select exactly one target process. When the user explicitly chooses **Apply Priority Boost Now**, CatalinaPerformance calls `scripts/app_priority_apply.sh`, saves the selected process's original nice value under `.catalina_performance_state/app_priority/`, logs the action, and applies a conservative nice value of `-5` by default.
+
+App Priority does **not** boost every app, lower background apps, auto-detect games/emulators/browsers, boost process trees, set CPU affinity, modify SIP, install helpers, load kexts, change fan control, clean caches, unload launch daemons, undervolt, or use MSR/experimental CPU controls. Only one selected process is supported for now so state capture, user intent, and restore behavior stay easy to audit.
+
+Restoration is handled by `scripts/app_priority_restore.sh`, which reads only CatalinaPerformance's saved app-priority state, skips processes that no longer exist, and prints a summary of attempted, successful, skipped, and failed restores. `scripts/performance_off.sh` also attempts this restore automatically when app-priority state exists, but continues with the existing pmset, Time Machine, and Spotlight restore flow if app-priority restore reports a problem.
+
+System and protected processes are blocked by default. The apply script refuses PID 0, PID 1, root/admin-owned processes unless explicitly allowed, and critical services such as `launchd`, `kernel_task`, `WindowServer`, `loginwindow`, Spotlight metadata services, backup services, `securityd`, `coreaudiod`, `configd`, Bluetooth, and Open Directory services.
+
+Manual commands:
+
+```sh
+scripts/app_priority_report.sh
+scripts/app_priority_apply.sh --pid 12345 --yes
+scripts/app_priority_restore.sh --dry-run --yes
+scripts/app_priority_restore.sh --yes
+```

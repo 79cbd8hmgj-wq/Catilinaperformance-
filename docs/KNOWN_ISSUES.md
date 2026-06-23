@@ -21,3 +21,11 @@ This page tracks current limitations and development notes for CatalinaPerforman
 ## Safety Boundaries
 
 CatalinaPerformance should continue to avoid SIP changes, automatic cache deletion, permanent service disablement, launch daemon changes, undervolting, MSR changes, kext changes, and other irreversible or unsafe system modifications.
+
+## App Priority Limitations
+
+- Priority boosting may not noticeably improve every app; CPU, GPU, memory pressure, disk I/O, thermal throttling, or the app's own workload may be the real bottleneck.
+- Setting a negative nice value can require administrator authorization on macOS, even for a user-owned process.
+- Protected and system processes are intentionally blocked, including critical services such as `launchd`, `kernel_task`, `WindowServer`, `loginwindow`, Spotlight metadata services, backup services, security, audio, network configuration, Bluetooth, and Open Directory services.
+- Closed processes cannot be restored because their PIDs no longer exist; CatalinaPerformance logs these skips and preserves state for troubleshooting.
+- Process IDs change after relaunch. Saved App Priority selections are lightweight UI preferences only and should not be blindly reused or auto-boosted on app launch.
