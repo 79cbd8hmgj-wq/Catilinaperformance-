@@ -232,6 +232,7 @@ enum ScriptKind {
     case emergencyRestore
     case memoryStorageReport
     case appPriorityReport
+    case thermalFanReport
 
     var fileName: String {
         switch self {
@@ -241,6 +242,7 @@ enum ScriptKind {
         case .emergencyRestore: return "emergency_restore.sh"
         case .memoryStorageReport: return "memory_storage_report.sh"
         case .appPriorityReport: return "app_priority_report.sh"
+        case .thermalFanReport: return "thermal_fan_report.sh"
         }
     }
 
@@ -251,7 +253,7 @@ enum ScriptKind {
             // these scripts, then passes --yes so script output can be captured
             // in the app instead of blocking on terminal input.
             return ["--yes"]
-        case .status, .performanceOff, .memoryStorageReport, .appPriorityReport:
+        case .status, .performanceOff, .memoryStorageReport, .appPriorityReport, .thermalFanReport:
             return []
         }
     }
@@ -260,7 +262,7 @@ enum ScriptKind {
         switch self {
         case .performanceOn, .performanceOff, .emergencyRestore:
             return true
-        case .status, .memoryStorageReport, .appPriorityReport:
+        case .status, .memoryStorageReport, .appPriorityReport, .thermalFanReport:
             return false
         }
     }
@@ -399,6 +401,9 @@ final class MainWindowController: NSWindowController {
                 onRunMemoryStorageCheck: { [weak self] in
                     self?.run(.memoryStorageReport, status: "Running Memory / Storage check...")
                 },
+                onRunThermalFanCheck: { [weak self] in
+                    self?.run(.thermalFanReport, status: "Running Thermal / Fan check...")
+                },
                 onPreferenceWriteFailure: { [weak self] message in
                     self?.showPreferenceWriteFailure(message)
                 }
@@ -497,11 +502,13 @@ final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
     private var memoryStorageButton: NSButton?
     private var appPriorityButton: NSButton?
+    private var thermalFanButton: NSButton?
     private var onRunAppPriorityReport: (() -> Void)?
     private var onRunMemoryStorageCheck: (() -> Void)?
+    private var onRunThermalFanCheck: (() -> Void)?
     private var onPreferenceWriteFailure: ((String) -> Void)?
 
-    convenience init(onRunAppPriorityReport: (() -> Void)? = nil, onRunMemoryStorageCheck: (() -> Void)? = nil, onPreferenceWriteFailure: ((String) -> Void)? = nil) {
+    convenience init(onRunAppPriorityReport: (() -> Void)? = nil, onRunMemoryStorageCheck: (() -> Void)? = nil, onRunThermalFanCheck: (() -> Void)? = nil, onPreferenceWriteFailure: ((String) -> Void)? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -512,6 +519,7 @@ final class AdvancedWindowController: NSWindowController {
         self.init(window: window)
         self.onRunAppPriorityReport = onRunAppPriorityReport
         self.onRunMemoryStorageCheck = onRunMemoryStorageCheck
+        self.onRunThermalFanCheck = onRunThermalFanCheck
         self.onPreferenceWriteFailure = onPreferenceWriteFailure
         AdvancedPreferences.registerDefaults(in: preferences)
         reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
@@ -523,7 +531,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Configure Advanced preferences. Background-service and power-management changes apply only when Performance Mode is explicitly turned ON. App Priority and Memory / Storage checks are read-only status reports and do not renice processes, delete files, clear caches, tune memory, or change system settings.")
+        let description = wrappedLabel("Configure Advanced preferences. Background-service and power-management changes apply only when Performance Mode is explicitly turned ON. App Priority, Memory / Storage, and Thermal / Fan checks are read-only status reports and do not renice processes, delete files, clear caches, tune memory, control fans, write SMC values, or change system settings.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -568,11 +576,14 @@ final class AdvancedWindowController: NSWindowController {
             disabledCheckbox("Browser cache cleanup — Not implemented yet — future manual-only feature"),
             disabledCheckbox("Automatic cleanup — Disabled and discouraged; not implemented")
         ]))
+        let thermalFanButton = NSButton(title: "Run Thermal / Fan Check", target: self, action: #selector(runThermalFanCheck))
+        self.thermalFanButton = thermalFanButton
         stack.addArrangedSubview(section("Thermal / Fan", controls: [
-            disabledCheckbox("Show fan RPM — Not implemented yet"),
-            disabledCheckbox("Show CPU temperature — Not implemented yet"),
+            wrappedLabel("Read-only monitoring only. The check reports thermal pressure/status when available, attempts to assess thermal constraints from safe built-in status output, and clearly warns when CPU temperature or fan RPM are unavailable without privileged or SMC access."),
+            thermalFanButton,
             disabledCheckbox("Aggressive fan behavior — Not implemented yet"),
-            disabledCheckbox("Max fans while Performance Mode is ON — Not implemented yet")
+            disabledCheckbox("Max fans while Performance Mode is ON — Not implemented yet"),
+            disabledCheckbox("Custom fan curve — Not implemented yet")
         ]))
         stack.addArrangedSubview(section("Experimental", controls: [
             disabledCheckbox("Turbo Boost detection — Not implemented yet"),
@@ -631,6 +642,7 @@ final class AdvancedWindowController: NSWindowController {
     func setScriptActionsEnabled(_ enabled: Bool) {
         memoryStorageButton?.isEnabled = enabled
         appPriorityButton?.isEnabled = enabled
+        thermalFanButton?.isEnabled = enabled
     }
 
     private func wrappedLabel(_ text: String) -> NSTextField {
@@ -646,6 +658,10 @@ final class AdvancedWindowController: NSWindowController {
     @objc private func runMemoryStorageCheck() {
         reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
         onRunMemoryStorageCheck?()
+    }
+
+    @objc private func runThermalFanCheck() {
+        onRunThermalFanCheck?()
     }
 
     @objc private func savePreference(_ sender: NSButton) {
