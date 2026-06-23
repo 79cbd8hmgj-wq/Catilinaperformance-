@@ -85,6 +85,7 @@ require_executable_or_file "$SCRIPT_DIR/status_report.sh"
 require_executable_or_file "$SCRIPT_DIR/performance_on.sh"
 require_executable_or_file "$SCRIPT_DIR/performance_off.sh"
 require_executable_or_file "$SCRIPT_DIR/emergency_restore.sh"
+require_executable_or_file "$SCRIPT_DIR/memory_storage_report.sh"
 
 printf 'Using developer directory: %s\n' "$XCODE_PATH"
 printf 'Building CatalinaPerformance GUI package: %s\n' "$PACKAGE_DIR"

@@ -160,6 +160,10 @@ struct AdvancedPreferences {
     static let pauseTimeMachineKey = "advanced.pauseTimeMachineWhileOn"
     static let preventSystemSleepKey = "advanced.preventPluggedInSystemSleepWhileOn"
     static let preventDisplaySleepKey = "advanced.preventDisplaySleepWhileOn"
+    static let showSwapUsageWarningKey = "advanced.showSwapUsageWarning"
+    static let showLowDiskSpaceWarningKey = "advanced.showLowDiskSpaceWarning"
+    static let showMemoryPressureSummaryKey = "advanced.showMemoryPressureSummary"
+    static let showTopMemoryProcessesKey = "advanced.showTopMemoryProcesses"
     static let configFileName = "advanced_preferences.env"
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
@@ -167,7 +171,11 @@ struct AdvancedPreferences {
             pauseSpotlightKey: true,
             pauseTimeMachineKey: true,
             preventSystemSleepKey: true,
-            preventDisplaySleepKey: true
+            preventDisplaySleepKey: true,
+            showSwapUsageWarningKey: true,
+            showLowDiskSpaceWarningKey: true,
+            showMemoryPressureSummaryKey: true,
+            showTopMemoryProcessesKey: true
         ])
     }
 
@@ -188,7 +196,11 @@ struct AdvancedPreferences {
         let timeMachine = defaults.bool(forKey: pauseTimeMachineKey) ? "1" : "0"
         let systemSleep = defaults.bool(forKey: preventSystemSleepKey) ? "1" : "0"
         let displaySleep = defaults.bool(forKey: preventDisplaySleepKey) ? "1" : "0"
-        let contents = "# CatalinaPerformance Advanced preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\nPREVENT_SYSTEM_SLEEP_WHILE_ON=\(systemSleep)\nPREVENT_DISPLAY_SLEEP_WHILE_ON=\(displaySleep)\n"
+        let swapWarning = defaults.bool(forKey: showSwapUsageWarningKey) ? "1" : "0"
+        let diskWarning = defaults.bool(forKey: showLowDiskSpaceWarningKey) ? "1" : "0"
+        let memoryPressure = defaults.bool(forKey: showMemoryPressureSummaryKey) ? "1" : "0"
+        let topMemoryProcesses = defaults.bool(forKey: showTopMemoryProcessesKey) ? "1" : "0"
+        let contents = "# CatalinaPerformance Advanced preferences.\n# Values are 1 for enabled and 0 for disabled. Missing or invalid values default to enabled in scripts.\nPAUSE_SPOTLIGHT_WHILE_ON=\(spotlight)\nPAUSE_TIME_MACHINE_WHILE_ON=\(timeMachine)\nPREVENT_SYSTEM_SLEEP_WHILE_ON=\(systemSleep)\nPREVENT_DISPLAY_SLEEP_WHILE_ON=\(displaySleep)\nSHOW_SWAP_USAGE_WARNING=\(swapWarning)\nSHOW_LOW_DISK_SPACE_WARNING=\(diskWarning)\nSHOW_MEMORY_PRESSURE_SUMMARY=\(memoryPressure)\nSHOW_TOP_MEMORY_PROCESSES=\(topMemoryProcesses)\n"
 
         do {
             try FileManager.default.createDirectory(at: configDirectoryURL, withIntermediateDirectories: true)
@@ -218,6 +230,7 @@ enum ScriptKind {
     case performanceOn
     case performanceOff
     case emergencyRestore
+    case memoryStorageReport
 
     var fileName: String {
         switch self {
@@ -225,6 +238,7 @@ enum ScriptKind {
         case .performanceOn: return "performance_on.sh"
         case .performanceOff: return "performance_off.sh"
         case .emergencyRestore: return "emergency_restore.sh"
+        case .memoryStorageReport: return "memory_storage_report.sh"
         }
     }
 
@@ -235,7 +249,7 @@ enum ScriptKind {
             // these scripts, then passes --yes so script output can be captured
             // in the app instead of blocking on terminal input.
             return ["--yes"]
-        case .status, .performanceOff:
+        case .status, .performanceOff, .memoryStorageReport:
             return []
         }
     }
@@ -244,7 +258,7 @@ enum ScriptKind {
         switch self {
         case .performanceOn, .performanceOff, .emergencyRestore:
             return true
-        case .status:
+        case .status, .memoryStorageReport:
             return false
         }
     }
@@ -369,9 +383,14 @@ final class MainWindowController: NSWindowController {
 
     @objc private func showAdvanced() {
         if advancedWindowController == nil {
-            advancedWindowController = AdvancedWindowController(onPreferenceWriteFailure: { [weak self] message in
-                self?.showPreferenceWriteFailure(message)
-            })
+            advancedWindowController = AdvancedWindowController(
+                onRunMemoryStorageCheck: { [weak self] in
+                    self?.run(.memoryStorageReport, status: "Running Memory / Storage check...")
+                },
+                onPreferenceWriteFailure: { [weak self] message in
+                    self?.showPreferenceWriteFailure(message)
+                }
+            )
         }
         advancedWindowController?.showWindow(nil)
         advancedWindowController?.window?.makeKeyAndOrderFront(nil)
@@ -456,9 +475,10 @@ final class MainWindowController: NSWindowController {
 
 final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
+    private var onRunMemoryStorageCheck: (() -> Void)?
     private var onPreferenceWriteFailure: ((String) -> Void)?
 
-    convenience init(onPreferenceWriteFailure: ((String) -> Void)? = nil) {
+    convenience init(onRunMemoryStorageCheck: (() -> Void)? = nil, onPreferenceWriteFailure: ((String) -> Void)? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -467,6 +487,7 @@ final class AdvancedWindowController: NSWindowController {
         )
         window.title = "CatalinaPerformance Advanced"
         self.init(window: window)
+        self.onRunMemoryStorageCheck = onRunMemoryStorageCheck
         self.onPreferenceWriteFailure = onPreferenceWriteFailure
         AdvancedPreferences.registerDefaults(in: preferences)
         reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
@@ -478,7 +499,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Configure which existing background-service pauses and power-management changes Performance Mode applies. Changes are saved locally and read by performance_on.sh the next time Performance Mode is turned ON.")
+        let description = wrappedLabel("Configure Advanced preferences. Background-service and power-management changes apply only when Performance Mode is explicitly turned ON. Memory / Storage checks are read-only status reports and do not delete files, clear caches, tune memory, or change system settings.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -504,10 +525,18 @@ final class AdvancedWindowController: NSWindowController {
             disabledCheckbox("Boost selected foreground app — Not implemented yet"),
             disabledCheckbox("Lower background app priority — Not implemented yet")
         ]))
+        let memoryStorageButton = NSButton(title: "Run Memory / Storage Check", target: self, action: #selector(runMemoryStorageCheck))
         stack.addArrangedSubview(section("Memory / Storage", controls: [
-            disabledCheckbox("Show swap warning — Not implemented yet"),
-            disabledCheckbox("Show low disk warning — Not implemented yet"),
-            disabledCheckbox("Cache cleanup tools — Not implemented yet; future manual-only feature")
+            wrappedLabel("Read-only warnings use conservative thresholds: swap above 1024 MB, disk free space below 10% or 10 GB, and macOS memory_pressure warn/critical output. These checks do not require sudo and do not modify the system."),
+            advancedCheckbox("Show swap usage warning", key: AdvancedPreferences.showSwapUsageWarningKey),
+            advancedCheckbox("Show low disk space warning", key: AdvancedPreferences.showLowDiskSpaceWarningKey),
+            advancedCheckbox("Show memory pressure summary", key: AdvancedPreferences.showMemoryPressureSummaryKey),
+            advancedCheckbox("Show top memory-heavy processes", key: AdvancedPreferences.showTopMemoryProcessesKey),
+            memoryStorageButton,
+            disabledCheckbox("Show top disk-heavy folders — Optional read-only scan not implemented yet"),
+            disabledCheckbox("Cache cleanup tools — Not implemented yet — future manual-only feature"),
+            disabledCheckbox("Browser cache cleanup — Not implemented yet — future manual-only feature"),
+            disabledCheckbox("Automatic cleanup — Disabled and discouraged; not implemented")
         ]))
         stack.addArrangedSubview(section("Thermal / Fan", controls: [
             disabledCheckbox("Show fan RPM — Not implemented yet"),
@@ -573,6 +602,11 @@ final class AdvancedWindowController: NSWindowController {
         let label = NSTextField(wrappingLabelWithString: text)
         label.maximumNumberOfLines = 0
         return label
+    }
+
+    @objc private func runMemoryStorageCheck() {
+        reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
+        onRunMemoryStorageCheck?()
     }
 
     @objc private func savePreference(_ sender: NSButton) {
