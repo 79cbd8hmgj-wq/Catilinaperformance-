@@ -63,7 +63,7 @@ if [ -n "$PMSET_THERM_OUTPUT" ]; then
         }
         {
             key = trim($1)
-            if (key == "CPU_Speed_Limit" || key == "GPU_Speed_Limit") {
+            if (key == "CPU_Speed_Limit" || key == "CPU_Scheduler_Limit" || key == "GPU_Speed_Limit") {
                 value = trim($2)
                 if (value ~ /^[0-9]+$/) {
                     print key "=" value
@@ -77,6 +77,19 @@ if [ -n "$PMSET_THERM_OUTPUT" ]; then
     else
         printf 'Parsed pmset percentage thermal limit values:\n'
         printf '%s\n' "$percentage_limits" | awk -F '=' '{ printf "%s = %s%%\n", $1, $2 }'
+        effective_cpu_limit=$(printf '%s\n' "$percentage_limits" | awk -F '=' '
+            $1 == "CPU_Speed_Limit" { speed = $2 + 0; have_speed = 1 }
+            $1 == "CPU_Scheduler_Limit" { scheduler = $2 + 0; have_scheduler = 1 }
+            END {
+                if (have_speed && have_scheduler) {
+                    printf "%d", (speed * scheduler) / 100
+                }
+            }
+        ' 2>/dev/null || true)
+        if [ -n "$effective_cpu_limit" ]; then
+            printf 'Effective CPU limit estimate: %s%% (CPU_Speed_Limit * CPU_Scheduler_Limit / 100)\n' "$effective_cpu_limit"
+        fi
+
         constrained_lines=$(printf '%s\n' "$percentage_limits" | awk -F '=' '$2 + 0 < 100 { printf "%s = %s%%\n", $1, $2 }' 2>/dev/null || true)
         if [ -n "$constrained_lines" ]; then
             warn 'The Mac appears thermally constrained based on parsed pmset percentage thermal limit values below 100%:'
