@@ -25,7 +25,7 @@ CatalinaPerformance should continue to avoid SIP changes, automatic cache deleti
 ## App Priority Limitations
 
 - Priority boosting may not noticeably improve every app; CPU, GPU, memory pressure, disk I/O, thermal throttling, or the app's own workload may be the real bottleneck.
-- Setting a negative nice value can require administrator authorization on macOS, even for a user-owned process.
+- Setting a negative nice value can require administrator authorization on macOS, even for a user-owned process; CatalinaPerformance should request that authorization only for the narrow `renice` operation.
 - Protected and system processes are intentionally blocked, including critical services such as `launchd`, `kernel_task`, `WindowServer`, `loginwindow`, Spotlight metadata services, backup services, security, audio, network configuration, Bluetooth, and Open Directory services.
 - Closed processes are skipped safely because their original process identity can no longer be matched; CatalinaPerformance logs these skips and preserves state for troubleshooting.
 - Process IDs can be reused after a process exits. App Priority restore verifies saved identity fields before renicing and skips stale PID / identity mismatches. Saved App Priority selections are lightweight UI preferences only and should not be blindly reused or auto-boosted on app launch.

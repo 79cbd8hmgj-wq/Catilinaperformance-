@@ -86,7 +86,7 @@ final class ScriptRunner {
         process.terminationHandler = { process in
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
-            let cancelled = script.requiresAdministratorPrivileges && process.terminationStatus != 0 && output.localizedCaseInsensitiveContains("User canceled")
+            let cancelled = process.terminationStatus != 0 && output.localizedCaseInsensitiveContains("User canceled")
             complete(ScriptResult(command: launchCommand, output: cancelled ? "Cancelled by user" : output, exitStatus: process.terminationStatus, timedOut: false, cancelled: cancelled))
         }
     }
@@ -263,7 +263,7 @@ enum ScriptKind {
         case .status, .performanceOff, .memoryStorageReport, .appPriorityReport:
             return []
         case .appPriorityApply(let pid):
-            return ["--pid", pid, "--yes"]
+            return ["--pid", pid, "--yes", "--expected-owner", NSUserName()]
         case .appPriorityRestore:
             return ["--yes"]
         }
@@ -271,9 +271,9 @@ enum ScriptKind {
 
     var requiresAdministratorPrivileges: Bool {
         switch self {
-        case .performanceOn, .performanceOff, .emergencyRestore, .appPriorityApply, .appPriorityRestore:
+        case .performanceOn, .performanceOff, .emergencyRestore, .appPriorityRestore:
             return true
-        case .status, .memoryStorageReport, .appPriorityReport:
+        case .status, .memoryStorageReport, .appPriorityReport, .appPriorityApply:
             return false
         }
     }
