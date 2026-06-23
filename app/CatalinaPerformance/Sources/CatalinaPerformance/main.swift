@@ -231,6 +231,7 @@ enum ScriptKind {
     case performanceOff
     case emergencyRestore
     case memoryStorageReport
+    case appPriorityReport
 
     var fileName: String {
         switch self {
@@ -239,6 +240,7 @@ enum ScriptKind {
         case .performanceOff: return "performance_off.sh"
         case .emergencyRestore: return "emergency_restore.sh"
         case .memoryStorageReport: return "memory_storage_report.sh"
+        case .appPriorityReport: return "app_priority_report.sh"
         }
     }
 
@@ -249,7 +251,7 @@ enum ScriptKind {
             // these scripts, then passes --yes so script output can be captured
             // in the app instead of blocking on terminal input.
             return ["--yes"]
-        case .status, .performanceOff, .memoryStorageReport:
+        case .status, .performanceOff, .memoryStorageReport, .appPriorityReport:
             return []
         }
     }
@@ -258,7 +260,7 @@ enum ScriptKind {
         switch self {
         case .performanceOn, .performanceOff, .emergencyRestore:
             return true
-        case .status, .memoryStorageReport:
+        case .status, .memoryStorageReport, .appPriorityReport:
             return false
         }
     }
@@ -391,6 +393,9 @@ final class MainWindowController: NSWindowController {
     @objc private func showAdvanced() {
         if advancedWindowController == nil {
             advancedWindowController = AdvancedWindowController(
+                onRunAppPriorityReport: { [weak self] in
+                    self?.run(.appPriorityReport, status: "Running App Priority report...")
+                },
                 onRunMemoryStorageCheck: { [weak self] in
                     self?.run(.memoryStorageReport, status: "Running Memory / Storage check...")
                 },
@@ -491,10 +496,12 @@ final class MainWindowController: NSWindowController {
 final class AdvancedWindowController: NSWindowController {
     private let preferences = UserDefaults.standard
     private var memoryStorageButton: NSButton?
+    private var appPriorityButton: NSButton?
+    private var onRunAppPriorityReport: (() -> Void)?
     private var onRunMemoryStorageCheck: (() -> Void)?
     private var onPreferenceWriteFailure: ((String) -> Void)?
 
-    convenience init(onRunMemoryStorageCheck: (() -> Void)? = nil, onPreferenceWriteFailure: ((String) -> Void)? = nil) {
+    convenience init(onRunAppPriorityReport: (() -> Void)? = nil, onRunMemoryStorageCheck: (() -> Void)? = nil, onPreferenceWriteFailure: ((String) -> Void)? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -503,6 +510,7 @@ final class AdvancedWindowController: NSWindowController {
         )
         window.title = "CatalinaPerformance Advanced"
         self.init(window: window)
+        self.onRunAppPriorityReport = onRunAppPriorityReport
         self.onRunMemoryStorageCheck = onRunMemoryStorageCheck
         self.onPreferenceWriteFailure = onPreferenceWriteFailure
         AdvancedPreferences.registerDefaults(in: preferences)
@@ -515,7 +523,7 @@ final class AdvancedWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Advanced")
         title.font = NSFont.boldSystemFont(ofSize: 24)
-        let description = wrappedLabel("Configure Advanced preferences. Background-service and power-management changes apply only when Performance Mode is explicitly turned ON. Memory / Storage checks are read-only status reports and do not delete files, clear caches, tune memory, or change system settings.")
+        let description = wrappedLabel("Configure Advanced preferences. Background-service and power-management changes apply only when Performance Mode is explicitly turned ON. App Priority and Memory / Storage checks are read-only status reports and do not renice processes, delete files, clear caches, tune memory, or change system settings.")
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -537,9 +545,14 @@ final class AdvancedWindowController: NSWindowController {
             disabledCheckbox("Disable Power Nap — Not implemented yet"),
             disabledCheckbox("Keep network awake — Not implemented yet")
         ]))
+        let appPriorityButton = NSButton(title: "Run App Priority Report", target: self, action: #selector(runAppPriorityReport))
+        self.appPriorityButton = appPriorityButton
         stack.addArrangedSubview(section("App Priority", controls: [
-            disabledCheckbox("Boost selected foreground app — Not implemented yet"),
-            disabledCheckbox("Lower background app priority — Not implemented yet")
+            wrappedLabel("Read-only monitoring only. The report lists current user processes with PID, owner, nice value, CPU %, memory %, and command. It requires no sudo and never changes process priority."),
+            appPriorityButton,
+            disabledCheckbox("Apply Priority Boost Now — Not implemented yet — disabled for safety"),
+            disabledCheckbox("Restore Priority — Not implemented yet — disabled for safety"),
+            disabledCheckbox("Enable selected app priority boost while Performance Mode is ON — Not implemented yet — disabled for safety")
         ]))
         let memoryStorageButton = NSButton(title: "Run Memory / Storage Check", target: self, action: #selector(runMemoryStorageCheck))
         self.memoryStorageButton = memoryStorageButton
@@ -617,12 +630,17 @@ final class AdvancedWindowController: NSWindowController {
 
     func setScriptActionsEnabled(_ enabled: Bool) {
         memoryStorageButton?.isEnabled = enabled
+        appPriorityButton?.isEnabled = enabled
     }
 
     private func wrappedLabel(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
         label.maximumNumberOfLines = 0
         return label
+    }
+
+    @objc private func runAppPriorityReport() {
+        onRunAppPriorityReport?()
     }
 
     @objc private func runMemoryStorageCheck() {

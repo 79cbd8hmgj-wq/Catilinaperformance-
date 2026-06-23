@@ -14,6 +14,7 @@ This page tracks current limitations and development notes for CatalinaPerforman
 
 ## Feature Gaps
 
+- App Priority mutation is intentionally disabled. The current App Priority support is read-only monitoring only, because PIDs are unstable and can be reused, process identity can become stale, and priority changes need a safer authorization and restore model before they can be shipped. A future implementation should use a safer privileged-helper design rather than GUI-side renice calls.
 - Fan control is not implemented yet.
 - Most Advanced options are placeholder-only; only the existing Background Services pause preferences and Power Behavior sleep/display preferences are script-readable via `~/Library/Application Support/CatalinaPerformance/advanced_preferences.env`.
 - Power Behavior placeholders for disk sleep, Power Nap, and keeping network awake are not implemented.
