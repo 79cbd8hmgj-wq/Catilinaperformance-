@@ -65,6 +65,7 @@ done
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 log() { mkdir -p "$STATE_DIR" 2>/dev/null || true; ts=$(date '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null || printf unknown-time); printf '%s %s\n' "$ts" "$1" | tee -a "$LOG_FILE" >/dev/null; }
 read_key() { awk -F= -v k="$1" '$1==k {print substr($0, index($0,"=")+1); exit}' "$2" 2>/dev/null; }
+shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 case "$PID" in ''|*[!0-9]*) printf 'Refusing to continue: PID must be numeric.\n' >&2; exit 2 ;; esac
 [ "$PID" -ne 0 ] 2>/dev/null || { printf 'Refusing to target PID 0.\n' >&2; exit 2; }
@@ -128,6 +129,26 @@ if [ -n "$EXPECTED_OWNER" ] || [ -n "$EXPECTED_COMMAND" ] || [ -n "$EXPECTED_STA
         fi
     fi
 fi
+
+identity_still_matches_current() {
+    check_info=$(ps -p "$PID" -o user=,comm= 2>/dev/null || true)
+    [ -n "$check_info" ] || return 1
+    check_owner=$(printf '%s\n' "$check_info" | awk '{print $1; exit}')
+    check_command=$(printf '%s\n' "$check_info" | awk '{$1=""; sub(/^[[:space:]]+/, ""); print; exit}')
+    check_start=$(ps -p "$PID" -o lstart= 2>/dev/null | sed -n '1p' || printf '')
+    check_full=$(ps -p "$PID" -o args= 2>/dev/null | sed -n '1p' || printf '')
+
+    [ "$check_owner" = "$OWNER" ] || return 1
+    [ "$check_command" = "$COMMAND_NAME" ] || return 1
+    if [ -n "$START_TIME" ]; then
+        [ "$check_start" = "$START_TIME" ] || return 1
+    elif [ -n "$FULL_COMMAND" ]; then
+        [ "$check_full" = "$FULL_COMMAND" ] || return 1
+    else
+        return 1
+    fi
+    return 0
+}
 
 state_matches_current() {
     file=$1
@@ -219,22 +240,73 @@ fi
 
 run_renice() {
     if [ "$(id -u 2>/dev/null || printf 1)" = "0" ]; then
+        if ! identity_still_matches_current; then
+            printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+            return 1
+        fi
         printf 'Running: renice %s -p %s\n' "$TARGET_NICE" "$PID"
         renice "$TARGET_NICE" -p "$PID"
         return $?
     fi
     if [ "$TARGET_NICE" -ge 0 ]; then
+        if ! identity_still_matches_current; then
+            printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+            return 1
+        fi
         printf 'Running: renice %s -p %s\n' "$TARGET_NICE" "$PID"
         renice "$TARGET_NICE" -p "$PID"
         return $?
     fi
     if command_exists osascript; then
         printf 'Administrator authorization may be required only for the renice command.\n'
-        command_text="/usr/bin/renice $TARGET_NICE -p $PID"
-        osascript -e "do shell script \"$command_text\" with administrator privileges"
-        return $?
+        check_script="$STATE_DIR/renice_identity_check_$PID_$$.sh"
+        {
+            printf '#!/bin/sh\n'
+            printf 'PID=%s\n' "$(shell_quote "$PID")"
+            printf 'OWNER=%s\n' "$(shell_quote "$OWNER")"
+            printf 'COMMAND_NAME=%s\n' "$(shell_quote "$COMMAND_NAME")"
+            printf 'START_TIME=%s\n' "$(shell_quote "$START_TIME")"
+            printf 'FULL_COMMAND=%s\n' "$(shell_quote "$FULL_COMMAND")"
+            printf 'TARGET_NICE=%s\n' "$(shell_quote "$TARGET_NICE")"
+            cat <<'CHECKSCRIPT'
+info=$(ps -p "$PID" -o user=,comm= 2>/dev/null || true)
+current_owner=$(printf '%s\n' "$info" | awk '{print $1; exit}')
+current_command=$(printf '%s\n' "$info" | awk '{$1=""; sub(/^[[:space:]]+/, ""); print; exit}')
+current_start=$(ps -p "$PID" -o lstart= 2>/dev/null | sed -n '1p' || printf '')
+current_full=$(ps -p "$PID" -o args= 2>/dev/null | sed -n '1p' || printf '')
+if [ -z "$info" ] || [ "$current_owner" != "$OWNER" ] || [ "$current_command" != "$COMMAND_NAME" ]; then
+    printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+    exit 44
+fi
+if [ -n "$START_TIME" ]; then
+    if [ "$current_start" != "$START_TIME" ]; then
+        printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+        exit 44
+    fi
+elif [ -n "$FULL_COMMAND" ]; then
+    if [ "$current_full" != "$FULL_COMMAND" ]; then
+        printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+        exit 44
+    fi
+else
+    printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+    exit 44
+fi
+/usr/bin/renice "$TARGET_NICE" -p "$PID"
+CHECKSCRIPT
+        } > "$check_script" || return 1
+        chmod 700 "$check_script" 2>/dev/null || true
+        quoted_script=$(shell_quote "$check_script")
+        osascript -e "do shell script \"/bin/sh $quoted_script\" with administrator privileges"
+        result=$?
+        rm -f "$check_script" 2>/dev/null || true
+        return $result
     fi
     printf 'Administrator authorization is required to set a negative nice value. Command: renice %s -p %s\n' "$TARGET_NICE" "$PID"
+    if ! identity_still_matches_current; then
+        printf 'Aborted: selected process identity changed before priority boost.\n' >&2
+        return 1
+    fi
     if command_exists sudo; then sudo renice "$TARGET_NICE" -p "$PID"; else return 1; fi
 }
 

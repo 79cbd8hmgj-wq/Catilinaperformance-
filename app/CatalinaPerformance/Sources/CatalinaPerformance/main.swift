@@ -170,6 +170,9 @@ struct AdvancedPreferences {
     static let showTopMemoryProcessesKey = "advanced.showTopMemoryProcesses"
     static let appPriorityLastPIDKey = "advanced.appPriorityLastPID"
     static let appPriorityLastNameKey = "advanced.appPriorityLastName"
+    static let appPriorityLastOwnerKey = "advanced.appPriorityLastOwner"
+    static let appPriorityLastStartKey = "advanced.appPriorityLastStart"
+    static let appPriorityLastFullCommandKey = "advanced.appPriorityLastFullCommand"
     static let configFileName = "advanced_preferences.env"
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
@@ -714,8 +717,9 @@ final class AdvancedWindowController: NSWindowController {
 
     private func selectedAppPriorityProcess() -> AppPriorityProcess? {
         let index = appPriorityPopup.indexOfSelectedItem
-        guard index >= 0 && index < appPriorityProcesses.count else { return nil }
-        return appPriorityProcesses[index]
+        let processIndex = index - 1
+        guard processIndex >= 0 && processIndex < appPriorityProcesses.count else { return nil }
+        return appPriorityProcesses[processIndex]
     }
 
     private func wrappedLabel(_ text: String) -> NSTextField {
@@ -741,8 +745,15 @@ final class AdvancedWindowController: NSWindowController {
 
     @objc private func applyAppPriorityBoost() {
         guard let process = selectedAppPriorityProcess() else { return }
+        guard !process.startTime.isEmpty || !process.fullCommand.isEmpty else {
+            appPriorityDetailsLabel.stringValue = "Selected process identity is incomplete. Refresh the process list and select the target again."
+            return
+        }
         preferences.set(process.pid, forKey: AdvancedPreferences.appPriorityLastPIDKey)
         preferences.set(process.name, forKey: AdvancedPreferences.appPriorityLastNameKey)
+        preferences.set(process.owner, forKey: AdvancedPreferences.appPriorityLastOwnerKey)
+        preferences.set(process.startTime, forKey: AdvancedPreferences.appPriorityLastStartKey)
+        preferences.set(process.fullCommand, forKey: AdvancedPreferences.appPriorityLastFullCommandKey)
         reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
         onRunAppPriorityApply?(process) { [weak self] _ in self?.refreshAppPriorityProcesses() }
     }
@@ -768,8 +779,10 @@ final class AdvancedWindowController: NSWindowController {
         }
         appPriorityProcesses = rows
         appPriorityPopup.removeAllItems()
+        appPriorityPopup.addItem(withTitle: "Select one running user process")
         if rows.isEmpty {
             appPriorityPopup.addItem(withTitle: "No user processes found")
+            appPriorityPopup.selectItem(at: 0)
             preferences.removeObject(forKey: AdvancedPreferences.appPriorityLastPIDKey)
             appPriorityDetailsLabel.stringValue = "No selectable user-owned processes were found. Refresh again after launching the target app."
         } else {
@@ -777,12 +790,28 @@ final class AdvancedWindowController: NSWindowController {
                 appPriorityPopup.addItem(withTitle: "\(process.name) — PID \(process.pid) — nice \(process.nice) — owner \(process.owner)")
             }
             let lastPID = preferences.string(forKey: AdvancedPreferences.appPriorityLastPIDKey)
-            if let lastPID = lastPID, let index = rows.firstIndex(where: { $0.pid == lastPID }) {
-                appPriorityPopup.selectItem(at: index)
+            let lastName = preferences.string(forKey: AdvancedPreferences.appPriorityLastNameKey)
+            let lastOwner = preferences.string(forKey: AdvancedPreferences.appPriorityLastOwnerKey)
+            let lastStart = preferences.string(forKey: AdvancedPreferences.appPriorityLastStartKey)
+            let lastFullCommand = preferences.string(forKey: AdvancedPreferences.appPriorityLastFullCommandKey)
+            if let lastPID = lastPID, let index = rows.firstIndex(where: { process in
+                process.pid == lastPID &&
+                    process.name == lastName &&
+                    process.owner == lastOwner &&
+                    (lastStart?.isEmpty ?? true || process.startTime == lastStart) &&
+                    (lastFullCommand?.isEmpty ?? true || process.fullCommand == lastFullCommand)
+            }) {
+                appPriorityPopup.selectItem(at: index + 1)
             } else if lastPID != nil {
                 preferences.removeObject(forKey: AdvancedPreferences.appPriorityLastPIDKey)
                 preferences.removeObject(forKey: AdvancedPreferences.appPriorityLastNameKey)
-                appPriorityDetailsLabel.stringValue = "Previously selected PID no longer exists. The selection was cleared because PIDs change after relaunch."
+                preferences.removeObject(forKey: AdvancedPreferences.appPriorityLastOwnerKey)
+                preferences.removeObject(forKey: AdvancedPreferences.appPriorityLastStartKey)
+                preferences.removeObject(forKey: AdvancedPreferences.appPriorityLastFullCommandKey)
+                appPriorityPopup.selectItem(at: 0)
+                appPriorityDetailsLabel.stringValue = "Previous App Priority selection is no longer valid; select a process again."
+            } else {
+                appPriorityPopup.selectItem(at: 0)
             }
         }
         updateAppPrioritySelectionDetails()
