@@ -32,14 +32,18 @@ unavailable_builtin() {
 printf 'CatalinaPerformance Thermal / Fan Check (read-only)\n'
 printf 'No sudo, fan control, SMC writes, kext loading, SIP changes, kernel changes, or system setting changes are performed.\n'
 
-if ! is_macos; then
+if ! is_macos && [ -z "${CATALINA_PERFORMANCE_SAMPLE_PMSET_THERM_OUTPUT:-}" ]; then
     printf 'Thermal / Fan monitoring currently supports macOS only. No system state was changed.\n'
     exit 0
 fi
 
 PMSET_THERM_OUTPUT=''
 print_section 'Thermal Pressure / Limits'
-if have_command pmset; then
+if [ -n "${CATALINA_PERFORMANCE_SAMPLE_PMSET_THERM_OUTPUT:-}" ]; then
+    PMSET_THERM_OUTPUT=$CATALINA_PERFORMANCE_SAMPLE_PMSET_THERM_OUTPUT
+    printf '%s\n' "$PMSET_THERM_OUTPUT"
+    printf 'Using sample pmset thermal output from CATALINA_PERFORMANCE_SAMPLE_PMSET_THERM_OUTPUT for non-mutating test coverage.\n'
+elif have_command pmset; then
     PMSET_THERM_OUTPUT=$(pmset -g therm 2>/dev/null || true)
     if [ -n "$PMSET_THERM_OUTPUT" ]; then
         printf '%s\n' "$PMSET_THERM_OUTPUT"
@@ -52,31 +56,37 @@ fi
 
 print_section 'Thermally Constrained Assessment'
 if [ -n "$PMSET_THERM_OUTPUT" ]; then
-    constrained_lines=$(printf '%s\n' "$PMSET_THERM_OUTPUT" | awk '
-        BEGIN { found = 0 }
-        /CPU_Speed_Limit|Scheduler_Limit|CPU_Scheduler_Limit/ {
-            for (i = 1; i <= NF; i++) {
-                value = $i
-                gsub(/[^0-9]/, "", value)
-                if (value != "" && value + 0 < 100) {
-                    print $0
-                    found = 1
-                    break
+    parsed_limits=$(printf '%s\n' "$PMSET_THERM_OUTPUT" | awk -F '=' '
+        function trim(value) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            return value
+        }
+        {
+            key = trim($1)
+            if (key == "CPU_Speed_Limit" || key == "GPU_Speed_Limit" || key == "CPU_Available_CPUs") {
+                value = trim($2)
+                if (value ~ /^[0-9]+$/) {
+                    print key "=" value
                 }
             }
         }
-        END { exit found ? 0 : 1 }
     ' 2>/dev/null || true)
-    if [ -n "$constrained_lines" ]; then
-        warn 'The Mac appears thermally or power constrained based on pmset thermal limit values below 100%:'
-        printf '%s\n' "$constrained_lines"
-    elif printf '%s\n' "$PMSET_THERM_OUTPUT" | awk '{ line = tolower($0); if (line ~ /warning|critical|trap|limited|reduced|heavy/) found = 1 } END { exit found ? 0 : 1 }'; then
-        warn 'pmset thermal output contains elevated-state wording. Review the Thermal Pressure / Limits section above.'
+
+    if [ -z "$parsed_limits" ]; then
+        printf 'Thermal constraint status unavailable from pmset output.\n'
     else
-        ok 'No obvious thermal constraint was detected in pmset -g therm output.'
+        printf 'Parsed pmset thermal limit values:\n'
+        printf '%s\n' "$parsed_limits" | awk -F '=' '{ printf "%s = %s%%\n", $1, $2 }'
+        constrained_lines=$(printf '%s\n' "$parsed_limits" | awk -F '=' '$2 + 0 < 100 { printf "%s = %s%%\n", $1, $2 }' 2>/dev/null || true)
+        if [ -n "$constrained_lines" ]; then
+            warn 'The Mac appears thermally constrained based on parsed pmset thermal limit values below 100%:'
+            printf '%s\n' "$constrained_lines"
+        else
+            ok 'Parsed pmset thermal limit values are all 100%; no thermal constraint was detected.'
+        fi
     fi
 else
-    printf 'Unable to determine whether the Mac is thermally constrained because thermal status data is unavailable.\n'
+    printf 'Thermal constraint status unavailable from pmset output.\n'
 fi
 
 print_section 'CPU Temperature'
