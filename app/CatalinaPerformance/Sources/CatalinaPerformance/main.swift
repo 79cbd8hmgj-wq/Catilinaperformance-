@@ -44,6 +44,8 @@ final class ScriptRunner {
         process.arguments = [scriptURL.path] + script.arguments
         var environment = ProcessInfo.processInfo.environment
         environment["CATALINA_PERFORMANCE_PREFERENCES_FILE"] = AdvancedPreferences.configFileURL.path
+        environment["CATALINA_PERFORMANCE_USER_HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+        environment["CATALINA_PERFORMANCE_USER_NAME"] = NSUserName()
         process.environment = environment
         finish(process, script: script, launchCommand: launchCommand, timeout: 60, completion: completion)
     }
@@ -100,10 +102,12 @@ final class ScriptRunner {
     }
 
     private func administratorAppleScript(for scriptURL: URL, arguments: [String]) -> String {
-        let environmentPrefix = "CATALINA_PERFORMANCE_PREFERENCES_FILE=" + shellQuote(AdvancedPreferences.configFileURL.path)
-        let command = ([environmentPrefix, "/bin/sh", scriptURL.path] + arguments).map { value in
-            value == environmentPrefix ? value : shellQuote(value)
-        }.joined(separator: " ")
+        let environmentPrefixes = [
+            "CATALINA_PERFORMANCE_PREFERENCES_FILE=" + shellQuote(AdvancedPreferences.configFileURL.path),
+            "CATALINA_PERFORMANCE_USER_HOME=" + shellQuote(FileManager.default.homeDirectoryForCurrentUser.path),
+            "CATALINA_PERFORMANCE_USER_NAME=" + shellQuote(NSUserName())
+        ]
+        let command = (environmentPrefixes + ["/bin/sh", scriptURL.path].map { shellQuote($0) } + arguments.map { shellQuote($0) }).joined(separator: " ")
         return "do shell script \(appleScriptString(command)) with administrator privileges"
     }
 
@@ -227,6 +231,17 @@ struct ScriptResult {
     }
 }
 
+struct AppPriorityProcess {
+    let pid: String
+    let name: String
+    let nice: String
+    let cpu: String
+    let memory: String
+    let owner: String
+    let startTime: String
+    let fullCommand: String
+}
+
 enum ScriptKind {
     case status
     case performanceOn
@@ -234,7 +249,7 @@ enum ScriptKind {
     case emergencyRestore
     case memoryStorageReport
     case appPriorityReport
-    case appPriorityApply(pid: String)
+    case appPriorityApply(process: AppPriorityProcess)
     case appPriorityRestore
 
     var fileName: String {
@@ -259,8 +274,15 @@ enum ScriptKind {
             return ["--yes"]
         case .status, .performanceOff, .memoryStorageReport, .appPriorityReport:
             return []
-        case .appPriorityApply(let pid):
-            return ["--pid", pid, "--yes", "--expected-owner", NSUserName()]
+        case .appPriorityApply(let process):
+            var args = ["--pid", process.pid, "--yes", "--expected-owner", process.owner, "--expected-command", process.name]
+            if !process.startTime.isEmpty {
+                args += ["--expected-start", process.startTime]
+            }
+            if !process.fullCommand.isEmpty {
+                args += ["--expected-full-command", process.fullCommand]
+            }
+            return args
         case .appPriorityRestore:
             return ["--yes"]
         }
@@ -409,12 +431,12 @@ final class MainWindowController: NSWindowController {
                 onRunAppPriorityReport: { [weak self] completion in
                     self?.run(.appPriorityReport, status: "Refreshing App Priority process list...", completion: completion)
                 },
-                onRunAppPriorityApply: { [weak self] pid, completion in
+                onRunAppPriorityApply: { [weak self] process, completion in
                     self?.confirm(
                         title: "Apply Priority Boost?",
                         message: "CatalinaPerformance will try to renice only the selected PID to a conservative nice value (-5), after saving the original nice value for restore. Administrator authorization may be required. System and protected processes are blocked by the script."
                     ) {
-                        self?.run(.appPriorityApply(pid: pid), status: "Applying App Priority boost...", completion: completion)
+                        self?.run(.appPriorityApply(process: process), status: "Applying App Priority boost...", completion: completion)
                     }
                 },
                 onRunAppPriorityRestore: { [weak self] completion in
@@ -526,14 +548,14 @@ final class AdvancedWindowController: NSWindowController {
     private var appPriorityProcesses: [AppPriorityProcess] = []
     private var onRunMemoryStorageCheck: (() -> Void)?
     private var onRunAppPriorityReport: (((ScriptResult) -> Void) -> Void)?
-    private var onRunAppPriorityApply: ((String, @escaping (ScriptResult) -> Void) -> Void)?
+    private var onRunAppPriorityApply: ((AppPriorityProcess, @escaping (ScriptResult) -> Void) -> Void)?
     private var onRunAppPriorityRestore: ((@escaping (ScriptResult) -> Void) -> Void)?
     private var onPreferenceWriteFailure: ((String) -> Void)?
 
     convenience init(
         onRunMemoryStorageCheck: (() -> Void)? = nil,
         onRunAppPriorityReport: (((ScriptResult) -> Void) -> Void)? = nil,
-        onRunAppPriorityApply: ((String, @escaping (ScriptResult) -> Void) -> Void)? = nil,
+        onRunAppPriorityApply: ((AppPriorityProcess, @escaping (ScriptResult) -> Void) -> Void)? = nil,
         onRunAppPriorityRestore: ((@escaping (ScriptResult) -> Void) -> Void)? = nil,
         onPreferenceWriteFailure: ((String) -> Void)? = nil
     ) {
@@ -690,15 +712,6 @@ final class AdvancedWindowController: NSWindowController {
         ]
     }
 
-    private struct AppPriorityProcess {
-        let pid: String
-        let name: String
-        let nice: String
-        let cpu: String
-        let memory: String
-        let owner: String
-    }
-
     private func selectedAppPriorityProcess() -> AppPriorityProcess? {
         let index = appPriorityPopup.indexOfSelectedItem
         guard index >= 0 && index < appPriorityProcesses.count else { return nil }
@@ -731,7 +744,7 @@ final class AdvancedWindowController: NSWindowController {
         preferences.set(process.pid, forKey: AdvancedPreferences.appPriorityLastPIDKey)
         preferences.set(process.name, forKey: AdvancedPreferences.appPriorityLastNameKey)
         reportPreferenceWriteResult(AdvancedPreferences.writeScriptConfig(defaults: preferences))
-        onRunAppPriorityApply?(process.pid) { [weak self] _ in self?.refreshAppPriorityProcesses() }
+        onRunAppPriorityApply?(process) { [weak self] _ in self?.refreshAppPriorityProcesses() }
     }
 
     @objc private func restoreAppPriorityBoost() {
@@ -742,7 +755,16 @@ final class AdvancedWindowController: NSWindowController {
         let rows = output.split(separator: "\n").compactMap { line -> AppPriorityProcess? in
             let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             guard fields.count >= 6, fields[0] != "PID", Int(fields[0]) != nil else { return nil }
-            return AppPriorityProcess(pid: fields[0], name: fields[1], nice: fields[2], cpu: fields[3], memory: fields[4], owner: fields[5])
+            return AppPriorityProcess(
+                pid: fields[0],
+                name: fields[1],
+                nice: fields[2],
+                cpu: fields[3],
+                memory: fields[4],
+                owner: fields[5],
+                startTime: fields.count > 6 ? fields[6] : "",
+                fullCommand: fields.count > 7 ? fields[7] : ""
+            )
         }
         appPriorityProcesses = rows
         appPriorityPopup.removeAllItems()

@@ -5,17 +5,39 @@ set -u
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)
-STATE_DIR="$REPO_ROOT/.catalina_performance_state/app_priority"
+default_app_priority_state_dir() {
+    if [ -n "${CATALINA_PERFORMANCE_APP_PRIORITY_STATE_DIR:-}" ]; then
+        printf '%s' "$CATALINA_PERFORMANCE_APP_PRIORITY_STATE_DIR"
+        return 0
+    fi
+    if [ -n "${CATALINA_PERFORMANCE_USER_HOME:-}" ]; then
+        printf '%s/Library/Application Support/CatalinaPerformance/app_priority' "$CATALINA_PERFORMANCE_USER_HOME"
+        return 0
+    fi
+    if [ "$(id -u 2>/dev/null || printf 1)" = "0" ] && command -v stat >/dev/null 2>&1; then
+        console_user=$(stat -f %Su /dev/console 2>/dev/null || printf '')
+        if [ -n "$console_user" ] && [ "$console_user" != "root" ] && [ -d "/Users/$console_user" ]; then
+            printf '/Users/%s/Library/Application Support/CatalinaPerformance/app_priority' "$console_user"
+            return 0
+        fi
+    fi
+    printf '%s/Library/Application Support/CatalinaPerformance/app_priority' "${HOME:-$REPO_ROOT}"
+}
+
+STATE_DIR=$(default_app_priority_state_dir)
 ARCHIVE_DIR="$STATE_DIR/archive"
 LOG_FILE="$STATE_DIR/app_priority.log"
 TARGET_NICE=-5
 ASSUME_YES=0
 ALLOW_ROOT_ADMIN=0
 EXPECTED_OWNER=""
+EXPECTED_COMMAND=""
+EXPECTED_START=""
+EXPECTED_FULL_COMMAND=""
 PID=""
 
 usage() { cat <<USAGE
-Usage: $0 --pid PID [--nice -5] [--yes] [--expected-owner USER]
+Usage: $0 --pid PID [--nice -5] [--yes] [--expected-owner USER] [--expected-command COMMAND] [--expected-start START] [--expected-full-command COMMANDLINE]
 
 Applies a conservative priority boost to one selected user-owned process. The
 original nice value and process identity are saved before renice runs so restore
@@ -30,6 +52,9 @@ while [ "$#" -gt 0 ]; do
         --nice) shift; TARGET_NICE=${1:-} ;;
         --yes|-y) ASSUME_YES=1 ;;
         --expected-owner) shift; EXPECTED_OWNER=${1:-} ;;
+        --expected-command) shift; EXPECTED_COMMAND=${1:-} ;;
+        --expected-start) shift; EXPECTED_START=${1:-} ;;
+        --expected-full-command) shift; EXPECTED_FULL_COMMAND=${1:-} ;;
         --allow-root-admin) ALLOW_ROOT_ADMIN=1 ;;
         --help|-h) usage; exit 0 ;;
         *) if [ -z "$PID" ]; then PID=$1; else printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2; fi ;;
@@ -74,6 +99,34 @@ fi
 if [ "$ALLOW_ROOT_ADMIN" -ne 1 ] && [ "$OWNER" = "root" ]; then
     printf 'Refusing to target root-owned process without an explicit future experimental flag.\n' >&2
     exit 2
+fi
+
+if [ -n "$EXPECTED_OWNER" ] || [ -n "$EXPECTED_COMMAND" ] || [ -n "$EXPECTED_START" ] || [ -n "$EXPECTED_FULL_COMMAND" ]; then
+    if [ -z "$EXPECTED_OWNER" ] || [ -z "$EXPECTED_COMMAND" ]; then
+        printf 'Aborted: selected process identity changed; refresh the process list and try again.\n' >&2
+        printf 'Expected owner and command are required for App Priority identity verification.\n' >&2
+        exit 1
+    fi
+    if [ -z "$EXPECTED_START" ] && [ -z "$EXPECTED_FULL_COMMAND" ]; then
+        printf 'Aborted: selected process identity changed; refresh the process list and try again.\n' >&2
+        printf 'Expected process start time or full command is required; refusing PID-only verification.\n' >&2
+        exit 1
+    fi
+    if [ "$OWNER" != "$EXPECTED_OWNER" ] || [ "$COMMAND_NAME" != "$EXPECTED_COMMAND" ]; then
+        printf 'Aborted: selected process identity changed; refresh the process list and try again.\n' >&2
+        exit 1
+    fi
+    if [ -n "$EXPECTED_START" ]; then
+        if [ -z "$START_TIME" ] || [ "$START_TIME" != "$EXPECTED_START" ]; then
+            printf 'Aborted: selected process identity changed; refresh the process list and try again.\n' >&2
+            exit 1
+        fi
+    elif [ -n "$EXPECTED_FULL_COMMAND" ]; then
+        if [ -z "$FULL_COMMAND" ] || [ "$FULL_COMMAND" != "$EXPECTED_FULL_COMMAND" ]; then
+            printf 'Aborted: selected process identity changed; refresh the process list and try again.\n' >&2
+            exit 1
+        fi
+    fi
 fi
 
 state_matches_current() {
